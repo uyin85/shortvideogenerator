@@ -3,68 +3,25 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Stable Horde on FastAPI</title>
+  <title>Pollinations Generator</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      font-family: system-ui, sans-serif;
-      background: #f7fafc;
-      padding: 20px;
-    }
-    .container {
-      max-width: 700px;
-      margin: 0 auto;
-      background: white;
-      padding: 25px;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-    }
+    body { font-family: system-ui; background: #f7fafc; padding: 20px; }
+    .container { max-width: 700px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
     h1 { color: #2d3748; margin-bottom: 8px; }
-    p { color: #718096; margin-bottom: 20px; }
-    textarea {
-      width: 100%;
-      height: 90px;
-      padding: 14px;
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      font-size: 16px;
-      margin: 12px 0;
-      resize: vertical;
-    }
-    button {
-      background: #3182ce;
-      color: white;
-      border: none;
-      padding: 12px 24px;
-      font-size: 16px;
-      border-radius: 8px;
-      cursor: pointer;
-      width: 100%;
-    }
+    textarea { width: 100%; height: 90px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 16px; margin: 12px 0; resize: vertical; }
+    button { background: #3182ce; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; width: 100%; }
     button:hover:not(:disabled) { background: #2c5282; }
     button:disabled { background: #cbd5e0; cursor: not-allowed; }
-    #status {
-      margin: 16px 0;
-      min-height: 22px;
-      color: #e53e3e;
-      font-weight: 500;
-    }
-    #result img {
-      max-width: 100%;
-      border-radius: 8px;
-      margin-top: 16px;
-      border: 1px solid #edf2f7;
-    }
-    a { color: #3182ce; text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    #status { margin: 16px 0; min-height: 22px; color: #e53e3e; font-weight: 500; }
+    #result img { max-width: 100%; border-radius: 8px; margin-top: 16px; border: 1px solid #edf2f7; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>✨ Stable Horde Generator</h1>
-    <p>Powered by <a href="https://stablehorde.net" target="_blank">Stable Horde</a> • FastAPI + Uvicorn</p>
-
-    <textarea id="prompt" placeholder="Describe your image (e.g., steampunk airship over clouds)">a wise old turtle with a tiny hat, watercolor style</textarea>
+    <h1>🎨 Pollinations.ai Generator</h1>
+    <p>Type a prompt and get an AI image instantly!</p>
+    
+    <textarea id="prompt" placeholder="e.g., futuristic city skyline at sunset, hyperrealistic">a cyberpunk cat wearing neon goggles</textarea>
     <button id="generate">Generate Image</button>
     <div id="status"></div>
     <div id="result"></div>
@@ -83,26 +40,23 @@
       }
 
       btn.disabled = true;
-      status.textContent = '📤 Sending request...';
+      status.textContent = '🎨 Generating...';
       result.innerHTML = '';
 
       try {
-        const res = await fetch('/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt })
-        });
-
-        const data = await res.json();
-
-        if (!res.ok) {
-          status.textContent = `❌ ${data.detail || 'Unknown error'}`;
-        } else {
-          status.textContent = '✅ Image ready!';
-          result.innerHTML = `<img src="${data.image_url}" alt="Generated" />`;
-        }
+        // Fetch image directly as blob
+        const imageUrl = `/generate?prompt=${encodeURIComponent(prompt)}`;
+        const img = new Image();
+        img.onload = () => {
+          status.textContent = '✅ Done!';
+          result.innerHTML = `<img src="${imageUrl}" alt="Generated" />`;
+        };
+        img.onerror = () => {
+          status.textContent = '❌ Failed to load image';
+        };
+        img.src = imageUrl;
       } catch (err) {
-        status.textContent = `💥 Network error: ${err.message}`;
+        status.textContent = `💥 Error: ${err.message}`;
       } finally {
         btn.disabled = false;
       }
