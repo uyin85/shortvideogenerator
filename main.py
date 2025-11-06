@@ -5,6 +5,7 @@ import urllib.parse
 import uuid
 import os
 from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip
+from gtts import gTTS
 
 app = FastAPI(title="AI Fact Short Video Generator")
 
@@ -15,6 +16,10 @@ PROMPTS = {
     "history": "Give me 5 short memorable history facts. One sentence each, under 15 words.",
     "sports": "Give me 5 short legendary sports facts. One sentence each, under 15 words."
 }
+
+def is_valid_mp3(data: bytes) -> bool:
+    """Check if data starts with MP3 sync bytes or ID3 tag."""
+    return data.startswith(b'\xff\xfb') or data.startswith(b'ID3')
 
 @app.get("/")
 async def home():
@@ -36,11 +41,9 @@ async def get_facts(category: str):
         facts = []
         for line in lines:
             cleaned = line.strip()
-            # Remove leading bullets/numbers
-            for char in "•-0123456789. ":
-                if cleaned.startswith(char):
-                    cleaned = cleaned.lstrip(char)
-            if cleaned and len(cleaned) > 10:
+            for prefix in "•-0123456789. ":
+                cleaned = cleaned.lstrip(prefix)
+            if 10 < len(cleaned) < 120:
                 facts.append(cleaned)
             if len(facts) >= 5:
                 break
@@ -61,21 +64,24 @@ async def generate_video(fact: str):
         with open(img_path, "wb") as f:
             f.write(img_data)
 
-        # 2. Generate audio
+        # 2. Try Pollinations TTS first
         audio_url = f"https://text.pollinations.ai/{encoded}?model=openai-audio&voice=nova"
-        audio_data = requests.get(audio_url, timeout=15).content
+        audio_resp = requests.get(audio_url, timeout=15)
         audio_path = f"/tmp/{uuid.uuid4()}.mp3"
-        with open(audio_path, "wb") as f:
-            f.write(audio_data)
 
-        # 3. Load and measure audio duration
+        if is_valid_mp3(audio_resp.content):
+            with open(audio_path, "wb") as f:
+                f.write(audio_resp.content)
+        else:
+            # Fallback to gTTS
+            tts = gTTS(text=safe_fact, lang='en', slow=False)
+            tts.save(audio_path)
+
+        # 3. Load audio and create video
         audio_clip = AudioFileClip(audio_path)
         duration = min(audio_clip.duration, 20)
 
-        # 4. Create video elements
         image_clip = ImageClip(img_path).set_duration(duration)
-        
-        # Caption (centered, with background for readability)
         txt_clip = TextClip(
             safe_fact,
             fontsize=42,
@@ -88,10 +94,7 @@ async def generate_video(fact: str):
             stroke_width=1
         ).set_duration(duration)
 
-        # 5. Combine
         final_video = CompositeVideoClip([image_clip, txt_clip]).set_audio(audio_clip.subclip(0, duration))
-
-        # 6. Export MP4
         output_path = f"/tmp/{uuid.uuid4()}.mp4"
         final_video.write_videofile(
             output_path,
@@ -104,11 +107,10 @@ async def generate_video(fact: str):
             threads=4
         )
 
-        # 7. Stream to user
         def iterfile():
             with open(output_path, "rb") as f:
                 yield from f
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Video generation failed: {str(e)}"}
