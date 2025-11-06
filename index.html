@@ -1,64 +1,127 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Pollinations Generator</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Fact Shorts</title>
   <style>
-    body { font-family: system-ui; background: #f7fafc; padding: 20px; }
-    .container { max-width: 700px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-    h1 { color: #2d3748; margin-bottom: 8px; }
-    textarea { width: 100%; height: 90px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 16px; margin: 12px 0; resize: vertical; }
-    button { background: #3182ce; color: white; border: none; padding: 12px 24px; font-size: 16px; border-radius: 8px; cursor: pointer; width: 100%; }
-    button:hover:not(:disabled) { background: #2c5282; }
-    button:disabled { background: #cbd5e0; cursor: not-allowed; }
-    #status { margin: 16px 0; min-height: 22px; color: #e53e3e; font-weight: 500; }
-    #result img { max-width: 100%; border-radius: 8px; margin-top: 16px; border: 1px solid #edf2f7; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      max-width: 700px;
+      margin: 20px auto;
+      padding: 0 15px;
+      background: #f9f9f9;
+    }
+    select, button {
+      width: 100%;
+      padding: 14px;
+      margin: 12px 0;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+    }
+    .fact {
+      padding: 14px;
+      background: white;
+      margin: 10px 0;
+      border-radius: 8px;
+      cursor: pointer;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      transition: background 0.2s;
+    }
+    .fact:hover { background: #f0f8ff; }
+    .selected { background: #e6f7ff; border-left: 4px solid #1890ff; }
+    #status {
+      color: #ff4d4f;
+      margin: 15px 0;
+      min-height: 22px;
+    }
+    #download-link {
+      display: none;
+      width: 100%;
+      padding: 14px;
+      background: #52c41a;
+      color: white;
+      text-align: center;
+      text-decoration: none;
+      border-radius: 8px;
+      margin-top: 20px;
+      font-weight: bold;
+    }
+    h1 { text-align: center; margin-bottom: 20px; color: #333; }
   </style>
 </head>
 <body>
-  <div class="container">
-    <h1>🎨 Pollinations.ai Generator</h1>
-    <p>Type a prompt and get an AI image instantly!</p>
-    
-    <textarea id="prompt" placeholder="e.g., futuristic city skyline at sunset, hyperrealistic">a cyberpunk cat wearing neon goggles</textarea>
-    <button id="generate">Generate Image</button>
-    <div id="status"></div>
-    <div id="result"></div>
-  </div>
+  <h1>🎬 AI Fact Short Video Generator</h1>
+
+  <select id="category">
+    <option value="">— Choose a Category —</option>
+    <option value="science">5 Facts: Science</option>
+    <option value="successful_person">5 Facts: Successful Person</option>
+    <option value="unsolved_mystery">5 Facts: Unsolved Mystery</option>
+    <option value="history">5 Facts: History to Remember</option>
+    <option value="sports">5 Facts: Sports Legend</option>
+  </select>
+
+  <div id="facts-list"></div>
+  <div id="status"></div>
+  <a id="download-link" target="_blank">⬇️ Download Your Video</a>
 
   <script>
-    document.getElementById('generate').addEventListener('click', async () => {
-      const prompt = document.getElementById('prompt').value.trim();
-      const btn = document.getElementById('generate');
-      const status = document.getElementById('status');
-      const result = document.getElementById('result');
+    let selectedFact = null;
 
-      if (!prompt) {
-        status.textContent = '⚠️ Please enter a prompt!';
+    document.getElementById('category').addEventListener('change', async () => {
+      const cat = document.getElementById('category').value;
+      if (!cat) return;
+
+      const status = document.getElementById('status');
+      status.textContent = '🧠 Asking AI for 5 facts...';
+      const res = await fetch(`/facts?category=${cat}`);
+      const data = await res.json();
+      status.textContent = '';
+
+      const list = document.getElementById('facts-list');
+      list.innerHTML = '<h3>✅ Choose One Fact to Turn Into a Video:</h3>';
+
+      if (data.error) {
+        status.textContent = `❌ ${data.error}`;
         return;
       }
 
-      btn.disabled = true;
-      status.textContent = '🎨 Generating...';
-      result.innerHTML = '';
+      data.facts.forEach(fact => {
+        const div = document.createElement('div');
+        div.className = 'fact';
+        div.textContent = fact;
+        div.onclick = () => {
+          document.querySelectorAll('.fact').forEach(el => el.classList.remove('selected'));
+          div.classList.add('selected');
+          selectedFact = fact;
+        };
+        list.appendChild(div);
+      });
+    });
 
-      try {
-        // Fetch image directly as blob
-        const imageUrl = `/generate?prompt=${encodeURIComponent(prompt)}`;
-        const img = new Image();
-        img.onload = () => {
-          status.textContent = '✅ Done!';
-          result.innerHTML = `<img src="${imageUrl}" alt="Generated" />`;
-        };
-        img.onerror = () => {
-          status.textContent = '❌ Failed to load image';
-        };
-        img.src = imageUrl;
-      } catch (err) {
-        status.textContent = `💥 Error: ${err.message}`;
-      } finally {
-        btn.disabled = false;
+    document.body.addEventListener('click', async (e) => {
+      if (e.target.classList.contains('fact') && selectedFact) {
+        const status = document.getElementById('status');
+        const link = document.getElementById('download-link');
+        status.textContent = '🎥 Generating your short video... (30-60 sec)';
+        link.style.display = 'none';
+
+        try {
+          const url = `/generate_video?fact=${encodeURIComponent(selectedFact)}`;
+          const blob = await fetch(url).then(r => {
+            if (!r.ok) throw new Error("Server error during video generation");
+            return r.blob();
+          });
+          const videoUrl = URL.createObjectURL(blob);
+          link.href = videoUrl;
+          link.style.display = 'block';
+          link.textContent = '✅ Download Your Fact Video!';
+          status.textContent = '🎉 Done! Tap below to save.';
+        } catch (err) {
+          status.textContent = `❌ Failed: ${err.message}`;
+        }
       }
     });
   </script>
