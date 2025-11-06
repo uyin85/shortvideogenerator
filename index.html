@@ -27,7 +27,6 @@
       border-radius: 8px;
       cursor: pointer;
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-      transition: background 0.2s;
     }
     .fact:hover { background: #f0f8ff; }
     .selected { background: #e6f7ff; border-left: 4px solid #1890ff; }
@@ -75,7 +74,7 @@
       if (!cat) return;
 
       const status = document.getElementById('status');
-      status.textContent = '🧠 Asking AI for 5 facts...';
+      status.textContent = '🧠 AI is generating 5 facts...';
       const res = await fetch(`/facts?category=${cat}`);
       const data = await res.json();
       status.textContent = '';
