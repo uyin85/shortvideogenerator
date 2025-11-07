@@ -12,8 +12,12 @@ import aiofiles
 import random
 from PIL import Image, ImageDraw
 import time
+from groq import Groq
 
 app = FastAPI(title="AI Fact Short Video Generator")
+
+# Initialize Groq client
+groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 # Add CORS middleware
 app.add_middleware(
@@ -28,11 +32,11 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 PROMPTS = {
-    "science": "Give me 5 short surprising science facts. One sentence each, under 15 words.",
-    "successful_person": "Give me 5 short inspiring facts about successful people. One sentence each, under 15 words.",
-    "unsolved_mystery": "Give me 5 short unsolved mysteries. One sentence each, under 15 words.",
-    "history": "Give me 5 short memorable history facts. One sentence each, under 15 words.",
-    "sports": "Give me 5 short legendary sports facts. One sentence each, under 15 words."
+    "science": "Give me 5 short surprising science facts. One sentence each, under 15 words. Make them interesting and educational.",
+    "successful_person": "Give me 5 short inspiring facts about successful people. One sentence each, under 15 words. Make them motivational.",
+    "unsolved_mystery": "Give me 5 short unsolved mysteries. One sentence each, under 15 words. Make them intriguing.",
+    "history": "Give me 5 short memorable history facts. One sentence each, under 15 words. Make them fascinating.",
+    "sports": "Give me 5 short legendary sports facts. One sentence each, under 15 words. Make them exciting."
 }
 
 # Background colors
@@ -43,6 +47,104 @@ CATEGORY_COLORS = {
     "history": ["#8B4513", "#CD853F", "#D2691E", "#A0522D"],
     "sports": ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
 }
+
+def generate_facts_with_groq(category: str):
+    """Generate facts using Groq API with llama-3.1-8b-instant"""
+    try:
+        print(f"Generating facts for {category} using Groq...")
+        
+        prompt = PROMPTS.get(category, PROMPTS["science"])
+        
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that generates interesting, concise facts. Always return exactly 5 facts, one per line, without numbers or bullet points."
+                },
+                {
+                    "role": "user", 
+                    "content": prompt
+                }
+            ],
+            max_tokens=300,
+            temperature=0.8
+        )
+        
+        facts_text = response.choices[0].message.content.strip()
+        print(f"Raw Groq response: {facts_text}")
+        
+        # Parse the facts - split by newlines and clean
+        lines = facts_text.split('\n')
+        facts = []
+        
+        for line in lines:
+            cleaned = line.strip()
+            # Remove numbers, bullets, and other prefixes
+            for prefix in ["•", "-", "—", "–", "—", "1.", "2.", "3.", "4.", "5."]:
+                if cleaned.startswith(prefix):
+                    cleaned = cleaned[len(prefix):].strip()
+            
+            # Remove quotes and other common formatting
+            cleaned = cleaned.strip('"').strip("'").strip()
+            
+            if 10 < len(cleaned) < 120 and cleaned:
+                facts.append(cleaned)
+            
+            if len(facts) >= 5:
+                break
+        
+        print(f"Parsed {len(facts)} facts: {facts}")
+        return facts[:5]
+        
+    except Exception as e:
+        print(f"Groq facts generation failed: {e}")
+        return None
+
+def generate_audio_with_groq(text: str, audio_path: str):
+    """Generate audio using Groq TTS API"""
+    try:
+        print(f"Generating audio with Groq TTS: '{text}'")
+        
+        response = groq_client.audio.speech.create(
+            model="playai-tts",
+            voice="Fritz-PlayAI",
+            input=text,
+            response_format="wav"
+        )
+        
+        # Save as WAV first
+        wav_path = audio_path.replace('.mp3', '.wav')
+        response.write_to_file(wav_path)
+        
+        # Convert WAV to MP3 using ffmpeg
+        if os.path.exists(wav_path):
+            subprocess.run([
+                "ffmpeg",
+                "-i", wav_path,
+                "-codec:a", "libmp3lame",
+                "-qscale:a", "2",
+                audio_path,
+                "-y",
+                "-loglevel", "error"
+            ], capture_output=True, timeout=30)
+            
+            # Clean up WAV file
+            try:
+                os.unlink(wav_path)
+            except:
+                pass
+            
+            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+                print(f"✓ Groq TTS audio generated: {os.path.getsize(audio_path)} bytes")
+                return True
+        
+        print("❌ Groq TTS file creation failed")
+        return False
+        
+    except Exception as e:
+        print(f"❌ Groq TTS failed: {e}")
+        return False
 
 def generate_gradient_background(width=768, height=768, colors=None):
     """Generate a beautiful background"""
@@ -109,150 +211,6 @@ def generate_image_placeholder(text: str, img_path: str, category="science"):
         print(f"✗ Placeholder image failed: {e}")
         return False
 
-def generate_audio_gtts_reliable(text: str, audio_path: str):
-    """Use gTTS with multiple retries and better error handling"""
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            print(f"Attempt {attempt + 1} to generate audio with gTTS...")
-            from gtts import gTTS
-            
-            # Create gTTS with specific parameters
-            tts = gTTS(
-                text=text,
-                lang='en',
-                slow=False,
-                lang_check=False
-            )
-            
-            # Save the audio file
-            tts.save(audio_path)
-            
-            # Verify the file was created and has content
-            if os.path.exists(audio_path):
-                file_size = os.path.getsize(audio_path)
-                print(f"✓ gTTS audio generated: {file_size} bytes")
-                
-                if file_size > 1000:  # File should be at least 1KB
-                    return True
-                else:
-                    print("File too small, retrying...")
-            else:
-                print("Audio file not created, retrying...")
-                
-            # Wait before retry
-            time.sleep(2)
-            
-        except Exception as e:
-            print(f"gTTS attempt {attempt + 1} failed: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2)  # Wait before retry
-            continue
-    
-    print("❌ All gTTS attempts failed")
-    return False
-
-def generate_audio_elevenlabs_free(text: str, audio_path: str):
-    """Try ElevenLabs free tier (no API key required for some voices)"""
-    try:
-        print("Trying ElevenLabs free TTS...")
-        
-        # ElevenLabs has some free voices available without API key
-        url = "https://api.elevenlabs.io/v1/text-to-speech/piTKgcLEGmPE4e6mEKli"
-        
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-        }
-        
-        data = {
-            "text": text,
-            "model_id": "eleven_monolingual_v1",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.5
-            }
-        }
-        
-        response = requests.post(url, json=data, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            with open(audio_path, "wb") as f:
-                f.write(response.content)
-            
-            file_size = os.path.getsize(audio_path)
-            print(f"✓ ElevenLabs audio generated: {file_size} bytes")
-            return file_size > 1000
-        else:
-            print(f"ElevenLabs failed with status: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"ElevenLabs error: {e}")
-        return False
-
-def generate_audio_voicerss(text: str, audio_path: str):
-    """Try VoiceRSS free TTS service"""
-    try:
-        print("Trying VoiceRSS TTS...")
-        
-        # VoiceRSS has a free tier (need to register for API key, but there's a demo key)
-        api_key = "YOUR_VOICERSS_API_KEY"  # Get free from voicerss.org
-        if api_key == "YOUR_VOICERSS_API_KEY":
-            # Use demo mode (limited)
-            api_key = "demo"
-        
-        url = "http://api.voicerss.org/"
-        params = {
-            "key": api_key,
-            "hl": "en-us",
-            "src": text,
-            "c": "MP3",
-            "f": "44khz_16bit_stereo"
-        }
-        
-        response = requests.get(url, params=params, timeout=30)
-        
-        if response.status_code == 200 and len(response.content) > 1000:
-            with open(audio_path, "wb") as f:
-                f.write(response.content)
-            print("✓ VoiceRSS audio generated")
-            return True
-        else:
-            print("VoiceRSS failed or returned empty audio")
-            return False
-            
-    except Exception as e:
-        print(f"VoiceRSS error: {e}")
-        return False
-
-def generate_audio_pyttsx3_fallback(text: str, audio_path: str):
-    """Try pyttsx3 as final fallback"""
-    try:
-        print("Trying pyttsx3 fallback...")
-        import pyttsx3
-        
-        engine = pyttsx3.init()
-        
-        # Try to configure the engine
-        try:
-            engine.setProperty('rate', 180)
-            engine.setProperty('volume', 0.9)
-        except:
-            pass  # Some properties might not be available
-        
-        engine.save_to_file(text, audio_path)
-        engine.runAndWait()
-        
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-            print("✓ pyttsx3 audio generated")
-            return True
-        return False
-        
-    except Exception as e:
-        print(f"pyttsx3 failed: {e}")
-        return False
-
 def generate_silent_audio(duration: int, audio_path: str):
     """Generate silent audio as last resort"""
     try:
@@ -283,28 +241,20 @@ async def home():
 
 @app.get("/facts")
 async def get_facts(category: str):
-    prompt = PROMPTS.get(category)
-    if not prompt:
+    if category not in PROMPTS:
         return {"error": "Invalid category"}
 
     try:
-        encoded = urllib.parse.quote(prompt)
-        response = requests.get(f"https://text.pollinations.ai/{encoded}", timeout=45)
-        if response.status_code != 200:
-            return {"error": "AI failed to generate facts"}
-
-        lines = response.text.strip().split('\n')
-        facts = []
-        for line in lines:
-            cleaned = line.strip()
-            for prefix in "•-0123456789. ":
-                cleaned = cleaned.lstrip(prefix)
-            if 10 < len(cleaned) < 120:
-                facts.append(cleaned)
-            if len(facts) >= 5:
-                break
+        # Use Groq API to generate facts
+        facts = generate_facts_with_groq(category)
+        
+        if not facts or len(facts) == 0:
+            return {"error": "Failed to generate facts with AI"}
+        
         return {"facts": facts[:5]}
+        
     except Exception as e:
+        print(f"Facts generation error: {e}")
         return {"error": f"Failed to fetch facts: {str(e)}"}
 
 @app.get("/generate_video")
@@ -330,32 +280,12 @@ async def generate_video(fact: str, category: str = "science"):
         if not image_generated:
             raise HTTPException(status_code=500, detail="All image generation methods failed")
 
-        # Generate audio with VOICE-OVER
-        print("🔊 Step 2: Generating VOICE-OVER audio...")
+        # Generate audio with Groq TTS
+        print("🔊 Step 2: Generating VOICE-OVER audio with Groq...")
         audio_path = f"/tmp/{uuid.uuid4()}.mp3"
-        audio_generated = False
-        audio_method = "None"
+        audio_generated = generate_audio_with_groq(safe_fact, audio_path)
         
-        # Try multiple TTS services in order of quality
-        audio_methods = [
-            ("ElevenLabs", lambda: generate_audio_elevenlabs_free(safe_fact, audio_path)),
-            ("gTTS", lambda: generate_audio_gtts_reliable(safe_fact, audio_path)),
-            ("VoiceRSS", lambda: generate_audio_voicerss(safe_fact, audio_path)),
-            ("pyttsx3", lambda: generate_audio_pyttsx3_fallback(safe_fact, audio_path))
-        ]
-        
-        for method_name, method_func in audio_methods:
-            if not audio_generated:
-                print(f"  🔊 Trying {method_name}...")
-                if method_func():
-                    audio_generated = True
-                    audio_method = method_name
-                    print(f"  ✅ {method_name} SUCCESS - Voice-over will be in video!")
-                    break
-                else:
-                    print(f"  ❌ {method_name} failed")
-        
-        print(f"🎯 Audio generation result: {audio_generated} (method: {audio_method})")
+        print(f"🎯 Groq TTS result: {audio_generated}")
 
         # Calculate duration
         if audio_generated:
@@ -394,7 +324,7 @@ async def generate_video(fact: str, category: str = "science"):
         if audio_generated and os.path.exists(audio_path):
             try:
                 audio_clip = AudioFileClip(audio_path).set_duration(duration)
-                print("✅ Audio loaded successfully for voice-over")
+                print("✅ Groq TTS audio loaded successfully for voice-over")
             except Exception as e:
                 print(f"Error loading audio clip: {e}")
                 audio_generated = False
@@ -402,7 +332,7 @@ async def generate_video(fact: str, category: str = "science"):
         # Combine video with VOICE-OVER audio
         if audio_generated and audio_clip:
             final_video = CompositeVideoClip([image_clip, txt_clip]).set_audio(audio_clip)
-            print("✅ Video created WITH VOICE-OVER")
+            print("✅ Video created WITH GROQ VOICE-OVER")
         else:
             final_video = CompositeVideoClip([image_clip, txt_clip])
             print("⚠️  Video created WITHOUT voice-over (silent)")
@@ -439,7 +369,7 @@ async def generate_video(fact: str, category: str = "science"):
             except:
                 pass
         
-        print("🎉 Video with voice-over ready for streaming!")
+        print("🎉 Video with Groq voice-over ready for streaming!")
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
