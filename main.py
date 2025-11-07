@@ -13,6 +13,8 @@ import random
 from PIL import Image, ImageDraw
 import time
 from groq import Groq
+import json
+import math
 
 app = FastAPI(title="AI Fact Short Video Generator")
 
@@ -145,6 +147,119 @@ def generate_audio_with_groq(text: str, audio_path: str):
     except Exception as e:
         print(f"❌ Groq TTS failed: {e}")
         return False
+
+def estimate_word_timings(text: str, total_duration: float):
+    """Estimate when each word should be highlighted (simple version)"""
+    words = text.split()
+    word_count = len(words)
+    
+    # Simple estimation: each word gets equal time
+    word_duration = total_duration / word_count
+    
+    timings = []
+    current_time = 0
+    
+    for i, word in enumerate(words):
+        # Start time for this word
+        start = current_time
+        # End time for this word (slightly overlap with next word)
+        end = start + word_duration * 1.1
+        
+        timings.append({
+            'word': word,
+            'start': start,
+            'end': end,
+            'index': i
+        })
+        
+        current_time += word_duration
+    
+    return timings
+
+def create_karaoke_text_clip(text: str, duration: float, screen_size, word_timings):
+    """Create a text clip with karaoke-style word highlighting"""
+    
+    def make_frame(t):
+        """Create a frame with highlighted words up to current time"""
+        # Create a PIL image for this frame
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+        
+        width, height = screen_size
+        img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        
+        # Try to use a font (fallback to default)
+        try:
+            font = ImageFont.truetype("Arial Bold", 36)
+        except:
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 36)
+            except:
+                font = ImageFont.load_default()
+        
+        # Split text into words
+        words = text.split()
+        
+        # Calculate text positioning
+        padding = 50
+        max_width = width - 2 * padding
+        line_height = 50
+        current_line = []
+        current_line_width = 0
+        lines = []
+        
+        # Break text into lines
+        for word in words:
+            # Estimate word width (rough approximation)
+            word_width = len(word) * 20
+            
+            if current_line_width + word_width > max_width and current_line:
+                lines.append(" ".join(current_line))
+                current_line = [word]
+                current_line_width = word_width
+            else:
+                current_line.append(word)
+                current_line_width += word_width + 10  # +10 for space
+        
+        if current_line:
+            lines.append(" ".join(current_line))
+        
+        # Calculate starting y position to center text
+        total_text_height = len(lines) * line_height
+        start_y = (height - total_text_height) // 2
+        
+        # Draw each line
+        for line_idx, line in enumerate(lines):
+            line_y = start_y + line_idx * line_height
+            
+            # Split line into words for highlighting
+            line_words = line.split()
+            current_x = padding
+            
+            for word_idx, word in enumerate(line_words):
+                # Check if this word should be highlighted
+                should_highlight = False
+                for timing in word_timings:
+                    if timing['word'] == word and timing['start'] <= t <= timing['end']:
+                        should_highlight = True
+                        break
+                
+                # Choose color
+                color = "#FFD700" if should_highlight else "#FFFFFF"  # Gold for highlighted, white for others
+                
+                # Draw word
+                draw.text((current_x, line_y), word, fill=color, font=font)
+                
+                # Move x position for next word
+                current_x += len(word) * 20 + 10  # Rough approximation
+            
+        return np.array(img)
+    
+    # Create VideoClip from the frame function
+    from moviepy.video.VideoClip import VideoClip
+    clip = VideoClip(make_frame, duration=duration)
+    return clip
 
 def generate_gradient_background(width=768, height=768, colors=None):
     """Generate a beautiful background"""
@@ -287,12 +402,20 @@ async def generate_video(fact: str, category: str = "science"):
         
         print(f"🎯 Groq TTS result: {audio_generated}")
 
-        # Calculate duration
+        # Calculate duration and estimate word timings
+        duration = 5  # Default duration
+        word_timings = []
+        
         if audio_generated:
             try:
                 audio_clip = AudioFileClip(audio_path)
                 duration = min(audio_clip.duration, 15)  # Max 15 seconds
                 print(f"⏱️  Audio duration: {duration:.2f} seconds")
+                
+                # Estimate word timings for karaoke effect
+                word_timings = estimate_word_timings(safe_fact, duration)
+                print(f"📝 Word timings estimated for {len(word_timings)} words")
+                
             except Exception as e:
                 print(f"Error loading audio: {e}")
                 audio_generated = False
@@ -302,22 +425,13 @@ async def generate_video(fact: str, category: str = "science"):
             print(f"⏱️  Estimated duration: {duration} seconds (NO VOICE-OVER)")
             generate_silent_audio(duration, audio_path)
 
-        # Create video
-        print("🎥 Step 3: Creating video with text and audio...")
+        # Create video with karaoke text
+        print("🎥 Step 3: Creating video with KARAOKE TEXT and audio...")
         image_clip = ImageClip(img_path).set_duration(duration)
         
-        # Create text caption (the fact text)
-        txt_clip = TextClip(
-            safe_fact,
-            fontsize=32,
-            font="Arial-Bold",
-            color="white",
-            size=(image_clip.w * 0.8, None),
-            method="caption",
-            align="center",
-            stroke_color="black",
-            stroke_width=3
-        ).set_position('center').set_duration(duration)
+        # Create karaoke-style text clip
+        screen_size = (image_clip.w, image_clip.h)
+        karaoke_text_clip = create_karaoke_text_clip(safe_fact, duration, screen_size, word_timings)
 
         # Load audio for voice-over
         audio_clip = None
@@ -329,12 +443,12 @@ async def generate_video(fact: str, category: str = "science"):
                 print(f"Error loading audio clip: {e}")
                 audio_generated = False
 
-        # Combine video with VOICE-OVER audio
+        # Combine everything
         if audio_generated and audio_clip:
-            final_video = CompositeVideoClip([image_clip, txt_clip]).set_audio(audio_clip)
-            print("✅ Video created WITH GROQ VOICE-OVER")
+            final_video = CompositeVideoClip([image_clip, karaoke_text_clip]).set_audio(audio_clip)
+            print("✅ Video created WITH KARAOKE TEXT & GROQ VOICE-OVER")
         else:
-            final_video = CompositeVideoClip([image_clip, txt_clip])
+            final_video = CompositeVideoClip([image_clip, karaoke_text_clip])
             print("⚠️  Video created WITHOUT voice-over (silent)")
 
         # Export video
@@ -343,7 +457,7 @@ async def generate_video(fact: str, category: str = "science"):
         
         final_video.write_videofile(
             output_path,
-            fps=12,
+            fps=24,  # Higher FPS for smoother text animation
             codec="libx264",
             audio_codec="aac" if audio_generated else None,
             remove_temp=True,
@@ -369,7 +483,7 @@ async def generate_video(fact: str, category: str = "science"):
             except:
                 pass
         
-        print("🎉 Video with Groq voice-over ready for streaming!")
+        print("🎉 Video with KARAOKE TEXT & Groq voice-over ready for streaming!")
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
