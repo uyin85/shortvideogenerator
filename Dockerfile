@@ -8,18 +8,19 @@ RUN apt-get update && \
         libmagickwand-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Fix ImageMagick policy to allow text rendering (required by MoviePy)
-RUN sed -i 's/<policy domain="path" rights="none" pattern="@\*"/<policy domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
+# Safely fix ImageMagick policy (works for v6 and v7)
+RUN if [ -f /etc/ImageMagick-6/policy.xml ]; then \
+        sed -i 's/<policy domain="path" rights="none" pattern="@*"/<policy domain="path" rights="read|write" pattern="@*"/g' /etc/ImageMagick-6/policy.xml; \
+    elif [ -f /etc/ImageMagick-7/policy.xml ]; then \
+        sed -i 's/<policy domain="path" rights="none" pattern="@*"/<policy domain="path" rights="read|write" pattern="@*"/g' /etc/ImageMagick-7/policy.xml; \
+    else \
+        echo "ImageMagick policy.xml not found — skipping policy fix."; \
+    fi
 
-# Set working directory
+# Set up app
 WORKDIR /app
-
-# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy your app code
 COPY . .
 
-# Run the FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
