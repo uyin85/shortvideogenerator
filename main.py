@@ -11,16 +11,14 @@ from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoCli
 import aiofiles
 import random
 from PIL import Image, ImageDraw
-import time
 from groq import Groq
-import numpy as np
 
 app = FastAPI(title="AI Fact Short Video Generator")
 
 # Initialize Groq client
 groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
-# Add CORS middleware
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,7 +27,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files (optional)
 app.mount("/static", StaticFiles(directory="."), name="static")
 
 PROMPTS = {
@@ -50,7 +47,6 @@ CATEGORY_COLORS = {
 
 def generate_facts_with_groq(category: str):
     try:
-        print(f"Generating facts for {category} using Groq...")
         prompt = PROMPTS.get(category, PROMPTS["science"])
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
@@ -62,7 +58,6 @@ def generate_facts_with_groq(category: str):
             temperature=0.8
         )
         facts_text = response.choices[0].message.content.strip()
-        print(f"Raw Groq response: {facts_text}")
         lines = facts_text.split('\n')
         facts = []
         for line in lines:
@@ -75,15 +70,13 @@ def generate_facts_with_groq(category: str):
                 facts.append(cleaned)
             if len(facts) >= 5:
                 break
-        print(f"Parsed {len(facts)} facts: {facts}")
         return facts[:5]
     except Exception as e:
-        print(f"Groq facts generation failed: {e}")
+        print(f"Groq facts error: {e}")
         return None
 
 def generate_audio_with_groq(text: str, audio_path: str):
     try:
-        print(f"Generating audio with Groq TTS: '{text}'")
         response = groq_client.audio.speech.create(
             model="playai-tts",
             voice="Fritz-PlayAI",
@@ -96,110 +89,79 @@ def generate_audio_with_groq(text: str, audio_path: str):
             subprocess.run([
                 "ffmpeg", "-i", wav_path, "-codec:a", "libmp3lame", "-qscale:a", "2", audio_path, "-y", "-loglevel", "error"
             ], capture_output=True, timeout=30)
-            try:
-                os.unlink(wav_path)
-            except:
-                pass
-            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-                print(f"✓ Groq TTS audio generated: {os.path.getsize(audio_path)} bytes")
-                return True
-        print("❌ Groq TTS file creation failed")
+            os.unlink(wav_path)
+            return os.path.getsize(audio_path) > 1000
         return False
     except Exception as e:
-        print(f"❌ Groq TTS failed: {e}")
+        print(f"Groq TTS error: {e}")
         return False
 
 def create_karaoke_subtitles(text: str, duration: float, screen_size):
     words = text.split()
-    word_count = len(words)
-    if word_count == 0:
+    if not words:
         return TextClip("", size=(1, 1)).set_duration(0)
-
-    word_duration = duration / word_count
-    screen_width, screen_height = screen_size
-    text_y_position = screen_height - 120
+    
+    word_duration = duration / len(words)
+    w, h = screen_size
+    y_pos = h - 120
 
     clips = []
+    for i in range(len(words)):
+        start = i * word_duration
+        end = (i + 1) * word_duration
+        spoken = " ".join(words[:i+1])
+        upcoming = " ".join(words[i+1:])
 
-    for i in range(word_count):
-        start_time = i * word_duration
-        end_time = (i + 1) * word_duration
-        spoken_words = " ".join(words[:i+1])
-        upcoming_words = " ".join(words[i+1:]) if i + 1 < word_count else ""
-
-        # Background for readability
+        # Background
         try:
-            bg_clip = TextClip(
-                txt=' ' * 100,
-                fontsize=50,
-                color='white',
-                bg_color='black',
-                size=(screen_width - 40, 80),
-                method='caption',
-                align='center'
-            ).set_opacity(0.6).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
-            clips.append(bg_clip)
-        except Exception as e:
-            print(f"Warning: Background subtitle failed: {e}")
+            bg = TextClip(
+                ' ' * 100, fontsize=50, color='white',
+                bg_color='black', size=(w - 40, 80),
+                method='caption', align='center'
+            ).set_opacity(0.6).set_position(('center', y_pos)).set_start(start).set_duration(word_duration)
+            clips.append(bg)
+        except:
+            pass
 
+        # Spoken text (gold)
+        full_text = spoken + (" " + upcoming if upcoming else "")
         try:
-            if spoken_words and upcoming_words:
-                # Spoken (gold)
-                highlight_clip = TextClip(
-                    txt=spoken_words,
-                    fontsize=46,
-                    color='#FFD700',
-                    stroke_color='black',
-                    stroke_width=3,
-                    method='caption',
-                    align='center'
-                ).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
-                clips.append(highlight_clip)
-
-                # Upcoming (white) - render full line and mask? Simpler: just show full line with partial color not supported.
-                # So fallback: show full line in white, then overwrite spoken part in gold (already done above).
-                # For simplicity, skip word-by-word alignment and just show full sentence with progressive highlight in center.
+            if upcoming:
+                # Show full sentence, but we can't highlight part — so show spoken in gold
+                txt = TextClip(
+                    spoken, fontsize=46, color='#FFD700',
+                    font='DejaVu-Sans-Bold',
+                    stroke_color='black', stroke_width=2,
+                    method='caption', align='center'
+                )
+                # Center it
+                txt = txt.set_position(('center', y_pos)).set_start(start).set_duration(word_duration)
+                clips.append(txt)
             else:
-                full_text = spoken_words + (" " + upcoming_words if upcoming_words else "")
-                final_clip = TextClip(
-                    txt=full_text,
-                    fontsize=46,
-                    color='#FFD700',
-                    stroke_color='black',
-                    stroke_width=3,
-                    size=(screen_width * 0.9, None),
-                    method='caption',
-                    align='center'
-                ).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
-                clips.append(final_clip)
+                txt = TextClip(
+                    full_text, fontsize=46, color='#FFD700',
+                    font='DejaVu-Sans-Bold',
+                    stroke_color='black', stroke_width=2,
+                    size=(w * 0.9, None), method='caption', align='center'
+                ).set_position(('center', y_pos)).set_start(start).set_duration(word_duration)
+                clips.append(txt)
         except Exception as e:
-            print(f"Warning: Main subtitle failed: {e}")
-            # Fallback to simple white text
+            print(f"⚠️ Subtitle render error: {e}")
             fallback = TextClip(
-                txt=text,
-                fontsize=46,
-                color='white',
-                stroke_color='black',
-                stroke_width=2,
-                size=(screen_width * 0.9, None),
-                method='caption',
-                align='center'
-            ).set_position(('center', text_y_position)).set_duration(duration)
+                text, fontsize=46, color='white',
+                stroke_color='black', stroke_width=1,
+                size=(w * 0.9, None), method='caption', align='center'
+            ).set_position(('center', y_pos)).set_duration(duration)
             return fallback
 
     if clips:
         return CompositeVideoClip(clips)
     else:
         return TextClip(
-            txt=text,
-            fontsize=46,
-            color='white',
-            stroke_color='black',
-            stroke_width=2,
-            size=(screen_width * 0.9, None),
-            method='caption',
-            align='center'
-        ).set_position(('center', text_y_position)).set_duration(duration)
+            text, fontsize=46, color='white',
+            stroke_color='black', stroke_width=1,
+            size=(w * 0.9, None), method='caption', align='center'
+        ).set_position(('center', y_pos)).set_duration(duration)
 
 def generate_gradient_background(width=768, height=768, colors=None):
     if colors is None:
@@ -209,56 +171,42 @@ def generate_gradient_background(width=768, height=768, colors=None):
     for _ in range(5):
         x = random.randint(0, width)
         y = random.randint(0, height)
-        radius = random.randint(50, 200)
-        color = random.choice(colors[1:]) if len(colors) > 1 else colors[0]
-        draw.ellipse([x-radius, y-radius, x+radius, y+radius], fill=color)
+        r = random.randint(50, 200)
+        c = random.choice(colors[1:]) if len(colors) > 1 else colors[0]
+        draw.ellipse([x-r, y-r, x+r, y+r], fill=c)
     return image
 
 def generate_image_pollinations(text: str, img_path: str):
     try:
-        print("Trying Pollinations.ai...")
         encoded = urllib.parse.quote(text)
-        img_url = f"https://pollinations.ai/p/{encoded}?width=768&height=768&nologo=true"
-        response = requests.get(img_url, timeout=30)
-        if response.status_code == 200:
+        url = f"https://pollinations.ai/p/{encoded}?width=768&height=768&nologo=true"
+        resp = requests.get(url, timeout=30)
+        if resp.status_code == 200:
             with open(img_path, "wb") as f:
-                f.write(response.content)
-            print("✓ Pollinations.ai image generated")
+                f.write(resp.content)
             return True
-        else:
-            print(f"✗ Pollinations.ai failed: {response.status_code}")
-            return False
     except Exception as e:
-        print(f"✗ Pollinations.ai error: {e}")
-        return False
+        print(f"Pollinations error: {e}")
+    return False
 
 def generate_image_placeholder(text: str, img_path: str, category="science"):
     try:
-        print("Generating placeholder image...")
-        width, height = 768, 768
-        colors = CATEGORY_COLORS.get(category, CATEGORY_COLORS["science"])
-        image = generate_gradient_background(width, height, colors)
-        draw = ImageDraw.Draw(image)
-        center_x, center_y = width // 2, height // 2
-        draw.ellipse([center_x - 200, center_y - 200, center_x + 200, center_y + 200], outline="white", width=5)
-        image.save(img_path, "JPEG", quality=85)
-        print("✓ Placeholder image generated")
+        img = generate_gradient_background(768, 768, CATEGORY_COLORS.get(category, CATEGORY_COLORS["science"]))
+        draw = ImageDraw.Draw(img)
+        cx, cy = 384, 384
+        draw.ellipse([cx-200, cy-200, cx+200, cy+200], outline="white", width=5)
+        img.save(img_path, "JPEG", quality=85)
         return True
     except Exception as e:
-        print(f"✗ Placeholder image failed: {e}")
+        print(f"Placeholder image error: {e}")
         return False
 
 def generate_silent_audio(duration: int, audio_path: str):
-    try:
-        print(f"Generating silent audio ({duration}s)...")
-        subprocess.run([
-            "ffmpeg", "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-            "-t", str(duration), "-c:a", "libmp3lame", audio_path, "-y", "-loglevel", "error"
-        ], capture_output=True, timeout=30)
-        return os.path.exists(audio_path) and os.path.getsize(audio_path) > 0
-    except Exception as e:
-        print(f"Silent audio failed: {e}")
-        return False
+    subprocess.run([
+        "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+        "-t", str(duration), "-q:a", "2", "-y", audio_path
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return os.path.exists(audio_path)
 
 @app.get("/")
 async def home():
@@ -267,72 +215,72 @@ async def home():
 @app.get("/facts")
 async def get_facts(category: str):
     if category not in PROMPTS:
-        return {"error": "Invalid category"}
-    try:
-        facts = generate_facts_with_groq(category)
-        if not facts:
-            return {"error": "Failed to generate facts"}
-        return {"facts": facts[:5]}
-    except Exception as e:
-        print(f"Facts error: {e}")
-        return {"error": str(e)}
+        raise HTTPException(status_code=400, detail="Invalid category")
+    facts = generate_facts_with_groq(category)
+    if not facts:
+        raise HTTPException(status_code=500, detail="Failed to generate facts")
+    return {"facts": facts[:5]}
 
 @app.get("/generate_video")
 async def generate_video(fact: str, category: str = "science"):
     safe_fact = fact.strip()[:300]
-    print(f"🎬 Generating video for: '{safe_fact}'")
+    if not safe_fact:
+        raise HTTPException(status_code=400, detail="Fact is empty")
 
+    # Generate image
     img_path = f"/tmp/{uuid.uuid4()}.jpg"
     if not (generate_image_pollinations(safe_fact, img_path) or generate_image_placeholder(safe_fact, img_path, category)):
         raise HTTPException(status_code=500, detail="Image generation failed")
 
+    # Generate audio
     audio_path = f"/tmp/{uuid.uuid4()}.mp3"
-    audio_generated = generate_audio_with_groq(safe_fact, audio_path)
+    audio_ok = generate_audio_with_groq(safe_fact, audio_path)
 
-    duration = 5
-    if audio_generated:
+    # Determine duration
+    duration = 5.0
+    if audio_ok:
         try:
-            audio_clip = AudioFileClip(audio_path)
-            duration = min(audio_clip.duration, 15)
+            ac = AudioFileClip(audio_path)
+            duration = min(ac.duration, 15.0)
         except:
-            audio_generated = False
-            duration = max(len(safe_fact.split()) * 0.4, 5)
+            audio_ok = False
+            duration = max(len(safe_fact.split()) * 0.45, 5.0)
     else:
-        duration = max(len(safe_fact.split()) * 0.4, 5)
+        duration = max(len(safe_fact.split()) * 0.45, 5.0)
         generate_silent_audio(int(duration), audio_path)
 
+    # Build video
     image_clip = ImageClip(img_path).set_duration(duration)
     screen_size = (image_clip.w, image_clip.h)
 
     try:
-        karaoke_subtitles = create_karaoke_subtitles(safe_fact, duration, screen_size)
+        subtitle_clip = create_karaoke_subtitles(safe_fact, duration, screen_size)
     except Exception as e:
-        print(f"⚠️ Subtitle crash: {e}")
-        karaoke_subtitles = TextClip(
-            safe_fact, fontsize=46, color='white', stroke_color='black', stroke_width=2,
+        print(f"Final subtitle fallback: {e}")
+        subtitle_clip = TextClip(
+            safe_fact, fontsize=46, color='white',
+            stroke_color='black', stroke_width=1,
             size=(screen_size[0]*0.9, None), method='caption', align='center'
         ).set_position(('center', screen_size[1]-120)).set_duration(duration)
 
-    final_video = image_clip
-    if audio_generated and os.path.exists(audio_path):
-        try:
-            audio_clip = AudioFileClip(audio_path).set_duration(duration)
-            final_video = CompositeVideoClip([image_clip, karaoke_subtitles]).set_audio(audio_clip)
-        except:
-            final_video = CompositeVideoClip([image_clip, karaoke_subtitles])
+    # Combine
+    if audio_ok and os.path.exists(audio_path):
+        audio_clip = AudioFileClip(audio_path).set_duration(duration)
+        final = CompositeVideoClip([image_clip, subtitle_clip]).set_audio(audio_clip)
     else:
-        final_video = CompositeVideoClip([image_clip, karaoke_subtitles])
+        final = CompositeVideoClip([image_clip, subtitle_clip])
 
-    output_path = f"/tmp/{uuid.uuid4()}.mp4"
-    final_video.write_videofile(
-        output_path,
+    # Export
+    out_path = f"/tmp/{uuid.uuid4()}.mp4"
+    final.write_videofile(
+        out_path,
         fps=24,
         codec="libx264",
-        audio_codec="aac" if audio_generated else None,
+        audio_codec="aac" if audio_ok else None,
         remove_temp=True,
         logger=None,
         verbose=False,
-        ffmpeg_params=['-preset', 'fast', '-crf', '28']
+        ffmpeg_params=["-preset", "fast", "-crf", "28"]
     )
 
     # Cleanup
@@ -341,10 +289,10 @@ async def generate_video(fact: str, category: str = "science"):
             os.unlink(f)
 
     def iterfile():
-        with open(output_path, "rb") as f:
+        with open(out_path, "rb") as f:
             yield from f
-        if os.path.exists(output_path):
-            os.unlink(output_path)
+        if os.path.exists(out_path):
+            os.unlink(out_path)
 
     return StreamingResponse(iterfile(), media_type="video/mp4")
 
