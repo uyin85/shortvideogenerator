@@ -147,36 +147,8 @@ def generate_audio_with_groq(text: str, audio_path: str):
         print(f"❌ Groq TTS failed: {e}")
         return False
 
-def estimate_word_timings(text: str, total_duration: float):
-    """Estimate when each word should be highlighted"""
-    words = text.split()
-    word_count = len(words)
-    
-    # Simple estimation: each word gets equal time
-    word_duration = total_duration / word_count
-    
-    timings = []
-    current_time = 0
-    
-    for i, word in enumerate(words):
-        # Start time for this word
-        start = current_time
-        # End time for this word
-        end = start + word_duration
-        
-        timings.append({
-            'word': word,
-            'start': start,
-            'end': end,
-            'index': i
-        })
-        
-        current_time += word_duration
-    
-    return timings
-
-def create_karaoke_text_clip_simple(text: str, duration: float, screen_size):
-    """Create a simpler karaoke effect using multiple TextClips"""
+def create_karaoke_text_clip_capcut_style(text: str, duration: float, screen_size):
+    """Create beautiful CapCut-style karaoke text at bottom of video"""
     
     words = text.split()
     word_count = len(words)
@@ -185,75 +157,103 @@ def create_karaoke_text_clip_simple(text: str, duration: float, screen_size):
     # Create a list to hold all text clips
     text_clips = []
     
-    for i, word in enumerate(words):
+    # Calculate position for bottom of screen (with some padding)
+    screen_width, screen_height = screen_size
+    bottom_position = screen_height - 150  # 150px from bottom
+    
+    for i in range(word_count):
         # Calculate start and end times for this word
         start_time = i * word_duration
         end_time = (i + 1) * word_duration
         
-        # Create highlighted text up to current word
-        highlighted_text = " ".join(words[:i+1])
-        remaining_text = " ".join(words[i+1:]) if i + 1 < word_count else ""
+        # Create two versions of text for this time segment:
+        # 1. The spoken words (yellow)
+        spoken_words = " ".join(words[:i+1])
+        # 2. The upcoming words (white)
+        upcoming_words = " ".join(words[i+1:]) if i + 1 < word_count else ""
         
-        # Create the full text with highlighting
-        full_text = f"{highlighted_text} {remaining_text}"
+        # Full text for this segment
+        full_text = f"{spoken_words} {upcoming_words}"
         
-        # Create text clip for this time segment
-        txt_clip = TextClip(
-            full_text,
-            fontsize=32,
+        # Create background for better readability (semi-transparent)
+        bg_height = 80
+        bg_clip = TextClip(
+            " " * len(full_text),  # Spaces to create background
+            fontsize=40,
             font="Arial-Bold",
-            color="white",
-            size=(screen_size[0] * 0.9, None),
+            color="black",
+            bg_color="black",
+            size=(screen_width * 0.95, bg_height),
             method="caption",
             align="center",
-            stroke_color="black",
-            stroke_width=2
-        ).set_position('center').set_duration(word_duration).set_start(start_time)
+            transparent=False
+        ).set_opacity(0.6).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
         
-        # Create a separate clip for the highlighted word
-        if i < word_count - 1:  # Not the last word
-            highlight_clip = TextClip(
-                highlighted_text,
-                fontsize=32,
+        text_clips.append(bg_clip)
+        
+        # Create the main text clip with karaoke effect
+        if spoken_words and upcoming_words:
+            # Create two separate text clips for different colors
+            spoken_clip = TextClip(
+                spoken_words,
+                fontsize=42,
                 font="Arial-Bold",
-                color="#FFD700",  # Gold color for highlighted text
-                size=(screen_size[0] * 0.9, None),
-                method="caption",
-                align="center",
+                color="#FFD700",  # Gold/Yellow for spoken words
                 stroke_color="black",
-                stroke_width=2
-            ).set_position('center').set_duration(word_duration).set_start(start_time)
+                stroke_width=3,
+                size=(screen_width * 0.9, None),
+                method="caption",
+                align="center"
+            ).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
             
-            text_clips.append(highlight_clip)
+            # Calculate position for upcoming words
+            upcoming_clip = TextClip(
+                upcoming_words,
+                fontsize=42,
+                font="Arial-Bold",
+                color="white",  # White for upcoming words
+                stroke_color="black",
+                stroke_width=3,
+                size=(screen_width * 0.9, None),
+                method="caption",
+                align="center"
+            )
+            
+            # Position upcoming words after spoken words
+            spoken_width = spoken_clip.w
+            upcoming_clip = upcoming_clip.set_position((spoken_width + 10, bottom_position)).set_duration(word_duration).set_start(start_time)
+            
+            text_clips.extend([spoken_clip, upcoming_clip])
+            
         else:
-            # Last word - highlight everything
-            highlight_clip = TextClip(
+            # All words are spoken (last segment) or only one word
+            final_clip = TextClip(
                 full_text,
-                fontsize=32,
+                fontsize=42,
                 font="Arial-Bold",
-                color="#FFD700",
-                size=(screen_size[0] * 0.9, None),
-                method="caption",
-                align="center",
+                color="#FFD700",  # Gold/Yellow for all words
                 stroke_color="black",
-                stroke_width=2
-            ).set_position('center').set_duration(word_duration).set_start(start_time)
+                stroke_width=3,
+                size=(screen_width * 0.9, None),
+                method="caption",
+                align="center"
+            ).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
             
-            text_clips.append(highlight_clip)
+            text_clips.append(final_clip)
     
     # If no words were processed (shouldn't happen), create a simple text clip
     if not text_clips:
         simple_clip = TextClip(
             text,
-            fontsize=32,
+            fontsize=42,
             font="Arial-Bold",
             color="white",
-            size=(screen_size[0] * 0.9, None),
-            method="caption",
-            align="center",
             stroke_color="black",
-            stroke_width=2
-        ).set_position('center').set_duration(duration)
+            stroke_width=3,
+            size=(screen_width * 0.9, None),
+            method="caption",
+            align="center"
+        ).set_position(('center', bottom_position)).set_duration(duration)
         return simple_clip
     
     # Combine all text clips
@@ -422,9 +422,9 @@ async def generate_video(fact: str, category: str = "science"):
         print("🎥 Step 3: Creating video with KARAOKE TEXT and audio...")
         image_clip = ImageClip(img_path).set_duration(duration)
         
-        # Create karaoke-style text clip (simpler version)
+        # Create beautiful CapCut-style karaoke text at bottom
         screen_size = (image_clip.w, image_clip.h)
-        karaoke_text_clip = create_karaoke_text_clip_simple(safe_fact, duration, screen_size)
+        karaoke_text_clip = create_karaoke_text_clip_capcut_style(safe_fact, duration, screen_size)
 
         # Load audio for voice-over
         audio_clip = None
@@ -436,10 +436,10 @@ async def generate_video(fact: str, category: str = "science"):
                 print(f"Error loading audio clip: {e}")
                 audio_generated = False
 
-        # Combine everything
+        # Combine everything - text should be on top
         if audio_generated and audio_clip:
             final_video = CompositeVideoClip([image_clip, karaoke_text_clip]).set_audio(audio_clip)
-            print("✅ Video created WITH KARAOKE TEXT & GROQ VOICE-OVER")
+            print("✅ Video created WITH BEAUTIFUL KARAOKE TEXT & GROQ VOICE-OVER")
         else:
             final_video = CompositeVideoClip([image_clip, karaoke_text_clip])
             print("⚠️  Video created WITHOUT voice-over (silent)")
@@ -476,7 +476,7 @@ async def generate_video(fact: str, category: str = "science"):
             except:
                 pass
         
-        print("🎉 Video with KARAOKE TEXT & Groq voice-over ready for streaming!")
+        print("🎉 Video with BEAUTIFUL KARAOKE TEXT & Groq voice-over ready for streaming!")
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
