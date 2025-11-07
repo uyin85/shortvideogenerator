@@ -146,201 +146,96 @@ def generate_audio_with_groq(text: str, audio_path: str):
         return False
 
 def format_time(seconds: float) -> str:
-    """Convert seconds to ASS time format: H:MM:SS.cc"""
+    """Convert seconds to SRT time format: HH:MM:SS,mmm"""
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = seconds % 60
-    return f"{hours}:{minutes:02d}:{secs:05.2f}"
+    milliseconds = int((secs - int(secs)) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{milliseconds:03d}"
 
-def create_karaoke_ass_subtitle(text: str, duration: float, ass_path: str):
-    """Create ASS subtitle with word-by-word karaoke effect"""
-    words = text.split()
-    word_count = len(words)
-    if word_count == 0:
-        return create_static_ass_subtitle(text, duration, ass_path)
-    
-    word_duration = duration / word_count
-    
-    ass_content = """[Script Info]
-Title: Karaoke Subtitles
-ScriptType: v4.00+
-PlayResX: 768
-PlayResY: 768
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Spoken,Arial,48,&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-Style: Upcoming,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+def create_simple_srt_subtitle(text: str, duration: float, srt_path: str):
+    """Create simple SRT subtitle that displays throughout the video"""
+    srt_content = f"""1
+{format_time(0)} --> {format_time(duration)}
+{text}
 """
+    with open(srt_path, 'w', encoding='utf-8') as f:
+        f.write(srt_content)
+    print(f"✓ SRT subtitle created: {text}")
+
+def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
+    """Create video with burned-in subtitles using simple FFmpeg approach"""
     
-    current_time = 0
-    for i in range(word_count):
-        start_time = format_time(current_time)
-        end_time = format_time(current_time + word_duration)
-        
-        # Words spoken so far (yellow)
-        spoken_words = " ".join(words[:i+1])
-        # Words upcoming (white)
-        upcoming_words = " ".join(words[i+1:]) if i + 1 < word_count else ""
-        
-        if upcoming_words:
-            dialogue = f"Dialogue: 0,{start_time},{end_time},Spoken,,0,0,0,,{spoken_words}\\N{{\\rUpcoming}}{upcoming_words}"
-        else:
-            dialogue = f"Dialogue: 0,{start_time},{end_time},Spoken,,0,0,0,,{spoken_words}"
-        
-        ass_content += dialogue + "\n"
-        current_time += word_duration
-    
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(ass_content)
-    print(f"✓ Karaoke subtitle created: {text}")
-
-def create_fade_in_ass_subtitle(text: str, duration: float, ass_path: str):
-    """Create ASS subtitle with fade-in effect"""
-    fade_duration = min(2.0, duration / 3)  # Fade over 2 seconds or 1/3 of duration
-    
-    ass_content = f"""[Script Info]
-Title: Fade-in Subtitles
-ScriptType: v4.00+
-PlayResX: 768
-PlayResY: 768
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: FadeStyle,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-# Fade in
-Dialogue: 0,0:00:00.00,{fade_duration:.2f},FadeStyle,,0,0,0,fade(0,255),{text}
-# Stay visible
-Dialogue: 0,{fade_duration:.2f},{duration:.2f},FadeStyle,,0,0,0,,{text}
-"""
-    
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(ass_content)
-    print(f"✓ Fade-in subtitle created: {text}")
-
-def create_typewriter_ass_subtitle(text: str, duration: float, ass_path: str):
-    """Create ASS subtitle with typewriter effect"""
-    char_duration = duration / max(len(text), 1)
-    
-    ass_content = """[Script Info]
-Title: Typewriter Subtitles
-ScriptType: v4.00+
-PlayResX: 768
-PlayResY: 768
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: TypeStyle,Arial,48,&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-"""
-    
-    current_time = 0
-    for i in range(1, len(text) + 1):
-        start_time = format_time(current_time)
-        end_time = format_time(min(current_time + char_duration, duration))
-        
-        visible_text = text[:i]
-        if visible_text.strip():
-            dialogue = f"Dialogue: 0,{start_time},{end_time},TypeStyle,,0,0,0,,{visible_text}"
-            ass_content += dialogue + "\n"
-        
-        current_time += char_duration
-        if current_time >= duration:
-            break
-    
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(ass_content)
-    print(f"✓ Typewriter subtitle created: {text}")
-
-def create_bouncing_ass_subtitle(text: str, duration: float, ass_path: str):
-    """Create ASS subtitle with bouncing animation"""
-    bounce_duration = min(2.0, duration / 3)
-    
-    ass_content = f"""[Script Info]
-Title: Bouncing Subtitles
-ScriptType: v4.00+
-PlayResX: 768
-PlayResY: 768
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: BounceStyle,Arial,48,&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-# Bounce in from bottom
-Dialogue: 0,0:00:00.00,{bounce_duration:.2f},BounceStyle,,0,0,0,move(384,800,384,650),{text}
-# Stay with slight movement
-Dialogue: 0,{bounce_duration:.2f},{duration:.2f},BounceStyle,,0,0,0,,{text}
-"""
-    
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(ass_content)
-    print(f"✓ Bouncing subtitle created: {text}")
-
-def create_static_ass_subtitle(text: str, duration: float, ass_path: str):
-    """Create static ASS subtitle"""
-    ass_content = f"""[Script Info]
-Title: Static Subtitles
-ScriptType: v4.00+
-PlayResX: 768
-PlayResY: 768
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: StaticStyle,Arial,48,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,3,0,2,10,10,50,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-Dialogue: 0,0:00:00.00,{duration:.2f},StaticStyle,,0,0,0,,{text}
-"""
-    
-    with open(ass_path, 'w', encoding='utf-8') as f:
-        f.write(ass_content)
-    print(f"✓ Static subtitle created: {text}")
-
-def create_video_with_subtitles_ffmpeg(image_path: str, audio_path: str, subtitle_path: str, output_path: str, duration: float):
-    """Create video with burned-in subtitles using FFmpeg"""
-    
-    cmd = [
-        'ffmpeg',
-        '-loop', '1',              # Loop the single image
-        '-i', image_path,          # Input image
-        '-i', audio_path,          # Input audio
-        '-vf', f"ass={subtitle_path}",  # Subtitle filter
-        '-t', str(duration),       # Duration
-        '-c:v', 'libx264',         # Video codec
-        '-c:a', 'aac',             # Audio codec
-        '-pix_fmt', 'yuv420p',     # Pixel format
-        '-shortest',               # End when audio ends
-        '-y',                      # Overwrite output
-        '-loglevel', 'error',      # Only show errors
-        output_path
-    ]
-    
-    print(f"Running FFmpeg: {' '.join(cmd)}")
+    # Create temporary SRT file
+    srt_path = f"/tmp/{uuid.uuid4()}.srt"
+    create_simple_srt_subtitle(text, duration, srt_path)
     
     try:
+        # Use FFmpeg with drawtext filter (more reliable than subtitles filter)
+        cmd = [
+            'ffmpeg',
+            '-loop', '1',
+            '-i', image_path,
+            '-i', audio_path,
+            '-vf', f"drawtext=text='{text}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.8:boxborderw=5:x=(w-text_w)/2:y=h-th-100",
+            '-t', str(duration),
+            '-c:v', 'libx264',
+            '-c:a', 'aac',
+            '-pix_fmt', 'yuv420p',
+            '-shortest',
+            '-y',
+            '-loglevel', 'info',  # Change to info to see errors
+            output_path
+        ]
+        
+        print(f"Running FFmpeg: {' '.join(cmd)}")
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        # Clean up SRT file
+        try:
+            os.unlink(srt_path)
+        except:
+            pass
+            
         if result.returncode == 0:
             print("✓ Video with subtitles created successfully")
             return True
         else:
             print(f"❌ FFmpeg failed: {result.stderr}")
-            return False
-    except subprocess.TimeoutExpired:
-        print("❌ FFmpeg timeout")
-        return False
+            # Fallback: try without subtitles
+            return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+        
     except Exception as e:
-        print(f"❌ FFmpeg error: {e}")
+        print(f"❌ FFmpeg subtitle failed: {e}")
+        # Clean up SRT file
+        try:
+            os.unlink(srt_path)
+        except:
+            pass
+        return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+
+def create_video_without_subtitles(image_path: str, audio_path: str, output_path: str, duration: float):
+    """Fallback: Create video without subtitles"""
+    try:
+        cmd = [
+            'ffmpeg',
+            '-loop', '1',
+            '-i', image_path,
+            '-i', audio_path,
+            '-t', str(duration),
+            '-c:v', 'libx264',
+            '-c:a', 'aac',
+            '-pix_fmt', 'yuv420p',
+            '-shortest',
+            '-y',
+            output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return result.returncode == 0
+    except Exception as e:
+        print(f"Fallback video creation failed: {e}")
         return False
 
 def generate_gradient_background(width=768, height=768, colors=None):
@@ -455,13 +350,13 @@ async def get_facts(category: str):
         return {"error": f"Failed to fetch facts: {str(e)}"}
 
 @app.get("/generate_video")
-async def generate_video(fact: str, category: str = "science", effect: str = "karaoke"):
+async def generate_video(fact: str, category: str = "science"):
     try:
         safe_fact = fact.strip()
         if len(safe_fact) > 300:
             safe_fact = safe_fact[:300]
 
-        print(f"🎬 Generating video for: '{safe_fact}' with {effect} effect")
+        print(f"🎬 Generating video for: '{safe_fact}'")
 
         # Generate image using multiple fallbacks
         print("🖼️  Step 1: Generating image...")
@@ -510,61 +405,25 @@ async def generate_video(fact: str, category: str = "science", effect: str = "ka
             print(f"⏱️  Estimated duration: {duration} seconds (NO VOICE-OVER)")
             generate_silent_audio(duration, audio_path)
 
-        # Create subtitle with selected effect
-        print("📝 Step 3: Creating animated subtitles...")
-        subtitle_path = f"/tmp/{uuid.uuid4()}.ass"
-        
-        if effect == "karaoke":
-            create_karaoke_ass_subtitle(safe_fact, duration, subtitle_path)
-        elif effect == "fade":
-            create_fade_in_ass_subtitle(safe_fact, duration, subtitle_path)
-        elif effect == "typewriter":
-            create_typewriter_ass_subtitle(safe_fact, duration, subtitle_path)
-        elif effect == "bouncing":
-            create_bouncing_ass_subtitle(safe_fact, duration, subtitle_path)
-        elif effect == "static":
-            create_static_ass_subtitle(safe_fact, duration, subtitle_path)
-        else:
-            create_karaoke_ass_subtitle(safe_fact, duration, subtitle_path)  # Default
-
         # Create video with FFmpeg and burned-in subtitles
-        print("🎥 Step 4: Creating video with FFmpeg subtitles...")
+        print("🎥 Step 3: Creating video with SUBTITLES...")
         output_path = f"/tmp/{uuid.uuid4()}.mp4"
         
-        video_created = create_video_with_subtitles_ffmpeg(
+        video_created = create_video_with_subtitles_simple(
             img_path, 
             audio_path, 
-            subtitle_path, 
+            safe_fact, 
             output_path, 
             duration
         )
         
         if not video_created:
-            # Fallback: try without subtitles
-            print("🔄 Fallback: Trying without subtitles...")
-            cmd = [
-                'ffmpeg',
-                '-loop', '1',
-                '-i', img_path,
-                '-i', audio_path,
-                '-t', str(duration),
-                '-c:v', 'libx264',
-                '-c:a', 'aac',
-                '-pix_fmt', 'yuv420p',
-                '-shortest',
-                '-y',
-                output_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            video_created = result.returncode == 0
-
-        if not video_created:
             raise HTTPException(status_code=500, detail="Video creation failed")
 
-        print("✅ Video with ANIMATED SUBTITLES created successfully!")
+        print("✅ Video with SUBTITLES created successfully!")
 
         # Cleanup temporary files
-        for temp_file in [img_path, audio_path, subtitle_path]:
+        for temp_file in [img_path, audio_path]:
             if temp_file and os.path.exists(temp_file):
                 try:
                     os.unlink(temp_file)
@@ -580,7 +439,7 @@ async def generate_video(fact: str, category: str = "science", effect: str = "ka
             except:
                 pass
         
-        print(f"🎉 Video with {effect.upper()} SUBTITLES ready for streaming!")
+        print("🎉 Video with SUBTITLES ready for streaming!")
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
