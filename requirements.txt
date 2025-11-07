@@ -5,3 +5,5 @@ moviepy==1.0.3
 pillow
 gtts
 aiofiles
+numpy
+pyttsx3
