@@ -147,118 +147,111 @@ def generate_audio_with_groq(text: str, audio_path: str):
         print(f"❌ Groq TTS failed: {e}")
         return False
 
-def create_karaoke_text_clip_capcut_style(text: str, duration: float, screen_size):
-    """Create beautiful CapCut-style karaoke text at bottom of video"""
+def create_karaoke_subtitles(text: str, duration: float, screen_size):
+    """Create beautiful karaoke-style subtitles with word-by-word highlighting"""
     
     words = text.split()
     word_count = len(words)
+    
+    if word_count == 0:
+        # Return empty clip if no words
+        return TextClip("", size=(1, 1)).set_duration(0)
+    
     word_duration = duration / word_count
     
-    # Create a list to hold all text clips
-    text_clips = []
-    
-    # Calculate position for bottom of screen (with some padding)
+    # Calculate position for bottom of screen
     screen_width, screen_height = screen_size
-    bottom_position = screen_height - 150  # 150px from bottom
+    text_y_position = screen_height - 120  # 120px from bottom
+    
+    # Create clips for each word segment
+    clips = []
     
     for i in range(word_count):
-        # Calculate start and end times for this word
         start_time = i * word_duration
         end_time = (i + 1) * word_duration
         
-        # Create two versions of text for this time segment:
-        # 1. The spoken words (yellow)
+        # Words spoken so far (highlighted in yellow)
         spoken_words = " ".join(words[:i+1])
-        # 2. The upcoming words (white)
+        # Words not yet spoken (in white)
         upcoming_words = " ".join(words[i+1:]) if i + 1 < word_count else ""
         
-        # Full text for this segment
-        full_text = f"{spoken_words} {upcoming_words}"
-        
-        # Create background for better readability (semi-transparent)
-        bg_height = 80
+        # Create semi-transparent background for better readability
         bg_clip = TextClip(
-            " " * len(full_text),  # Spaces to create background
-            fontsize=40,
-            font="Arial-Bold",
-            color="black",
-            bg_color="black",
-            size=(screen_width * 0.95, bg_height),
-            method="caption",
-            align="center",
-            transparent=False
-        ).set_opacity(0.6).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
+            txt=' ' * 100,  # Wide background
+            fontsize=50,
+            color='white',
+            bg_color='black',
+            size=(screen_width - 40, 80),
+            method='caption',
+            align='center'
+        ).set_opacity(0.6).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
+        clips.append(bg_clip)
         
-        text_clips.append(bg_clip)
-        
-        # Create the main text clip with karaoke effect
+        # Create the main text with karaoke effect
         if spoken_words and upcoming_words:
-            # Create two separate text clips for different colors
-            spoken_clip = TextClip(
-                spoken_words,
-                fontsize=42,
-                font="Arial-Bold",
-                color="#FFD700",  # Gold/Yellow for spoken words
-                stroke_color="black",
+            # Create highlighted text (spoken words)
+            highlight_clip = TextClip(
+                txt=spoken_words,
+                fontsize=46,
+                font='Arial-Bold',
+                color='#FFD700',  # Gold color for spoken words
+                stroke_color='black',
                 stroke_width=3,
-                size=(screen_width * 0.9, None),
-                method="caption",
-                align="center"
-            ).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
+                method='caption',
+                align='center'
+            ).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
+            clips.append(highlight_clip)
             
-            # Calculate position for upcoming words
-            upcoming_clip = TextClip(
-                upcoming_words,
-                fontsize=42,
-                font="Arial-Bold",
-                color="white",  # White for upcoming words
-                stroke_color="black",
+            # Create normal text (upcoming words)
+            normal_clip = TextClip(
+                txt=upcoming_words,
+                fontsize=46,
+                font='Arial-Bold',
+                color='white',  # White for upcoming words
+                stroke_color='black',
                 stroke_width=3,
-                size=(screen_width * 0.9, None),
-                method="caption",
-                align="center"
+                method='caption',
+                align='center'
             )
             
-            # Position upcoming words after spoken words
-            spoken_width = spoken_clip.w
-            upcoming_clip = upcoming_clip.set_position((spoken_width + 10, bottom_position)).set_duration(word_duration).set_start(start_time)
+            # Position normal text to the right of highlighted text
+            temp_highlight = TextClip(spoken_words, fontsize=46, font='Arial-Bold')
+            highlight_width = temp_highlight.w
+            normal_x = (screen_width // 2) + (highlight_width // 2) + 10
             
-            text_clips.extend([spoken_clip, upcoming_clip])
+            normal_clip = normal_clip.set_position((normal_x, text_y_position)).set_duration(word_duration).set_start(start_time)
+            clips.append(normal_clip)
             
         else:
-            # All words are spoken (last segment) or only one word
+            # All words are spoken (last segment) or single word
             final_clip = TextClip(
-                full_text,
-                fontsize=42,
-                font="Arial-Bold",
-                color="#FFD700",  # Gold/Yellow for all words
-                stroke_color="black",
+                txt=spoken_words + " " + upcoming_words,
+                fontsize=46,
+                font='Arial-Bold',
+                color='#FFD700',  # Gold color for all words
+                stroke_color='black',
                 stroke_width=3,
-                size=(screen_width * 0.9, None),
-                method="caption",
-                align="center"
-            ).set_position(('center', bottom_position)).set_duration(word_duration).set_start(start_time)
-            
-            text_clips.append(final_clip)
+                method='caption',
+                align='center'
+            ).set_position(('center', text_y_position)).set_duration(word_duration).set_start(start_time)
+            clips.append(final_clip)
     
-    # If no words were processed (shouldn't happen), create a simple text clip
-    if not text_clips:
-        simple_clip = TextClip(
-            text,
-            fontsize=42,
-            font="Arial-Bold",
-            color="white",
-            stroke_color="black",
+    # Combine all clips
+    if clips:
+        return CompositeVideoClip(clips)
+    else:
+        # Fallback: simple text clip
+        return TextClip(
+            txt=text,
+            fontsize=46,
+            font='Arial-Bold',
+            color='white',
+            stroke_color='black',
             stroke_width=3,
             size=(screen_width * 0.9, None),
-            method="caption",
-            align="center"
-        ).set_position(('center', bottom_position)).set_duration(duration)
-        return simple_clip
-    
-    # Combine all text clips
-    final_text_clip = CompositeVideoClip(text_clips)
-    return final_text_clip
+            method='caption',
+            align='center'
+        ).set_position(('center', text_y_position)).set_duration(duration)
 
 def generate_gradient_background(width=768, height=768, colors=None):
     """Generate a beautiful background"""
@@ -418,13 +411,13 @@ async def generate_video(fact: str, category: str = "science"):
             print(f"⏱️  Estimated duration: {duration} seconds (NO VOICE-OVER)")
             generate_silent_audio(duration, audio_path)
 
-        # Create video with karaoke text
-        print("🎥 Step 3: Creating video with KARAOKE TEXT and audio...")
+        # Create video with karaoke subtitles
+        print("🎥 Step 3: Creating video with KARAOKE SUBTITLES...")
         image_clip = ImageClip(img_path).set_duration(duration)
         
-        # Create beautiful CapCut-style karaoke text at bottom
+        # Create beautiful karaoke subtitles
         screen_size = (image_clip.w, image_clip.h)
-        karaoke_text_clip = create_karaoke_text_clip_capcut_style(safe_fact, duration, screen_size)
+        karaoke_subtitles = create_karaoke_subtitles(safe_fact, duration, screen_size)
 
         # Load audio for voice-over
         audio_clip = None
@@ -436,12 +429,12 @@ async def generate_video(fact: str, category: str = "science"):
                 print(f"Error loading audio clip: {e}")
                 audio_generated = False
 
-        # Combine everything - text should be on top
+        # Combine everything - karaoke subtitles on top of image
         if audio_generated and audio_clip:
-            final_video = CompositeVideoClip([image_clip, karaoke_text_clip]).set_audio(audio_clip)
-            print("✅ Video created WITH BEAUTIFUL KARAOKE TEXT & GROQ VOICE-OVER")
+            final_video = CompositeVideoClip([image_clip, karaoke_subtitles]).set_audio(audio_clip)
+            print("✅ Video created WITH KARAOKE SUBTITLES & GROQ VOICE-OVER")
         else:
-            final_video = CompositeVideoClip([image_clip, karaoke_text_clip])
+            final_video = CompositeVideoClip([image_clip, karaoke_subtitles])
             print("⚠️  Video created WITHOUT voice-over (silent)")
 
         # Export video
@@ -450,7 +443,7 @@ async def generate_video(fact: str, category: str = "science"):
         
         final_video.write_videofile(
             output_path,
-            fps=12,
+            fps=24,
             codec="libx264",
             audio_codec="aac" if audio_generated else None,
             remove_temp=True,
@@ -460,7 +453,7 @@ async def generate_video(fact: str, category: str = "science"):
         )
         print("✅ Video exported successfully")
 
-        # Cleanup
+        # Cleanup temporary files
         for temp_file in [img_path, audio_path]:
             if temp_file and os.path.exists(temp_file):
                 try:
@@ -471,12 +464,13 @@ async def generate_video(fact: str, category: str = "science"):
         def iterfile():
             with open(output_path, "rb") as f:
                 yield from f
+            # Clean up video file after streaming
             try:
                 os.unlink(output_path)
             except:
                 pass
         
-        print("🎉 Video with BEAUTIFUL KARAOKE TEXT & Groq voice-over ready for streaming!")
+        print("🎉 Video with KARAOKE SUBTITLES & Groq voice-over ready for streaming!")
         return StreamingResponse(iterfile(), media_type="video/mp4")
 
     except Exception as e:
