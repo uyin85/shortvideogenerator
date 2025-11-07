@@ -250,6 +250,159 @@
       color: #667eea;
     }
 
+    /* Progress Bar Styles */
+    .progress-container {
+      width: 100%;
+      background: #e2e8f0;
+      border-radius: 10px;
+      margin: 20px 0;
+      overflow: hidden;
+      display: none;
+    }
+
+    .progress-bar {
+      width: 0%;
+      height: 8px;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      border-radius: 10px;
+      transition: width 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .progress-bar::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+      animation: shimmer 2s infinite;
+    }
+
+    @keyframes shimmer {
+      0% { left: -100%; }
+      100% { left: 100%; }
+    }
+
+    .progress-steps {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #718096;
+    }
+
+    .progress-step {
+      text-align: center;
+      flex: 1;
+      position: relative;
+    }
+
+    .progress-step.active {
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    .progress-step.completed::before {
+      content: '✓';
+      color: #48bb78;
+      font-weight: bold;
+      margin-right: 5px;
+    }
+
+    .progress-info {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+
+    .progress-percentage {
+      font-weight: 600;
+      color: #667eea;
+    }
+
+    .progress-time {
+      color: #718096;
+      font-size: 12px;
+    }
+
+    /* Generation Steps */
+    .generation-steps {
+      background: #f8f9fa;
+      border-radius: 12px;
+      padding: 20px;
+      margin: 20px 0;
+      display: none;
+    }
+
+    .generation-step {
+      display: flex;
+      align-items: center;
+      margin-bottom: 15px;
+      padding: 10px;
+      border-radius: 8px;
+      transition: all 0.3s ease;
+    }
+
+    .generation-step:last-child {
+      margin-bottom: 0;
+    }
+
+    .generation-step.active {
+      background: #ebf8ff;
+      border-left: 4px solid #4299e1;
+    }
+
+    .generation-step.completed {
+      background: #f0fff4;
+      border-left: 4px solid #48bb78;
+    }
+
+    .step-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-right: 12px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .step-icon.pending {
+      background: #e2e8f0;
+      color: #718096;
+    }
+
+    .step-icon.active {
+      background: #4299e1;
+      color: white;
+    }
+
+    .step-icon.completed {
+      background: #48bb78;
+      color: white;
+    }
+
+    .step-text {
+      flex: 1;
+    }
+
+    .step-title {
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .step-description {
+      font-size: 12px;
+      color: #718096;
+    }
+
     /* Responsive design */
     @media (max-width: 600px) {
       body {
@@ -266,6 +419,10 @@
       
       .feature-list {
         grid-template-columns: 1fr;
+      }
+
+      .progress-steps {
+        font-size: 10px;
       }
     }
 
@@ -327,13 +484,60 @@
     
     <div id="status"></div>
 
+    <!-- Progress Bar Section -->
+    <div class="progress-container" id="progress-container">
+      <div class="progress-bar" id="progress-bar"></div>
+      <div class="progress-info">
+        <span class="progress-percentage" id="progress-percentage">0%</span>
+        <span class="progress-time" id="progress-time">Estimating time...</span>
+      </div>
+      <div class="progress-steps">
+        <div class="progress-step" id="step-image">Image</div>
+        <div class="progress-step" id="step-audio">Audio</div>
+        <div class="progress-step" id="step-karaoke">Karaoke</div>
+        <div class="progress-step" id="step-export">Export</div>
+      </div>
+    </div>
+
+    <!-- Generation Steps -->
+    <div class="generation-steps" id="generation-steps">
+      <div class="generation-step" id="step-1">
+        <div class="step-icon pending">1</div>
+        <div class="step-text">
+          <div class="step-title">Generating AI Image</div>
+          <div class="step-description">Creating visual content with AI</div>
+        </div>
+      </div>
+      <div class="generation-step" id="step-2">
+        <div class="step-icon pending">2</div>
+        <div class="step-text">
+          <div class="step-title">Generating Voice Audio</div>
+          <div class="step-description">Converting text to speech</div>
+        </div>
+      </div>
+      <div class="generation-step" id="step-3">
+        <div class="step-icon pending">3</div>
+        <div class="step-text">
+          <div class="step-title">Creating Karaoke Subtitles</div>
+          <div class="step-description">Syncing text with voice</div>
+        </div>
+      </div>
+      <div class="generation-step" id="step-4">
+        <div class="step-icon pending">4</div>
+        <div class="step-text">
+          <div class="step-title">Exporting Video</div>
+          <div class="step-description">Finalizing video file</div>
+        </div>
+      </div>
+    </div>
+
     <div class="video-section">
       <div class="section-title">
         <div class="icon icon-video"></div>
         Video Generation
       </div>
       <p style="text-align: center; color: #718096; margin-bottom: 15px; font-size: 14px;">
-        Click on any fact above to generate a short video with voice-over
+        Click on any fact above to generate a short video with voice-over and karaoke subtitles
       </p>
       <a id="download-link" target="_blank">⬇️ Download Your Video</a>
     </div>
@@ -342,6 +546,8 @@
   <script>
     let selectedFact = null;
     let currentCategory = '';
+    let progressInterval = null;
+    let startTime = null;
 
     // Category selection handler
     document.getElementById('category').addEventListener('change', async function() {
@@ -354,12 +560,16 @@
       const status = document.getElementById('status');
       const factsList = document.getElementById('facts-list');
       const downloadLink = document.getElementById('download-link');
+      const progressContainer = document.getElementById('progress-container');
+      const generationSteps = document.getElementById('generation-steps');
 
       // Reset UI
       status.textContent = '';
       status.className = '';
       factsList.innerHTML = '';
       downloadLink.style.display = 'none';
+      progressContainer.style.display = 'none';
+      generationSteps.style.display = 'none';
 
       // Show loading
       status.textContent = '🧠 AI is generating 5 interesting facts...';
@@ -401,7 +611,7 @@
             
             // Show video generation hint
             const status = document.getElementById('status');
-            status.textContent = '✅ Fact selected! The video will include voice-over reading this text.';
+            status.textContent = '✅ Fact selected! The video will include voice-over and karaoke subtitles.';
             status.className = 'status-success';
           };
           
@@ -419,16 +629,36 @@
       if (e.target.classList.contains('fact') && selectedFact) {
         const status = document.getElementById('status');
         const downloadLink = document.getElementById('download-link');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const progressPercentage = document.getElementById('progress-percentage');
+        const progressTime = document.getElementById('progress-time');
+        const generationSteps = document.getElementById('generation-steps');
         
-        // Reset download link
+        // Reset UI
         downloadLink.style.display = 'none';
+        downloadLink.classList.remove('pulse');
+        progressBar.style.width = '0%';
+        progressPercentage.textContent = '0%';
+        progressTime.textContent = 'Estimating time...';
         
-        // Show video generation status
-        status.innerHTML = '<div class="loading-spinner"></div> Generating your short video with voice-over... (30-60 seconds)';
-        status.className = 'status-loading';
+        // Show progress elements
+        progressContainer.style.display = 'block';
+        generationSteps.style.display = 'block';
+        
+        // Reset all steps
+        resetProgressSteps();
 
         try {
           const url = `/generate_video?fact=${encodeURIComponent(selectedFact)}&category=${currentCategory}`;
+          
+          // Start progress animation
+          startProgressAnimation();
+          
+          // Start time tracking
+          startTime = Date.now();
+          updateTimeEstimate();
+          
           const response = await fetch(url);
           
           if (!response.ok) {
@@ -443,14 +673,17 @@
             throw new Error("Empty video file generated");
           }
 
+          // Stop progress animation and show completion
+          completeProgressAnimation();
+          
           // Create download link
           const videoUrl = URL.createObjectURL(blob);
           downloadLink.href = videoUrl;
           downloadLink.style.display = 'block';
-          downloadLink.textContent = '🎬 Download Video with Voice-over';
+          downloadLink.textContent = '🎬 Download Video with Karaoke Subtitles';
           downloadLink.classList.add('pulse');
           
-          status.innerHTML = '✅ Video generated successfully! Click download to get your video with voice-over.';
+          status.innerHTML = '✅ Video generated successfully! Click download to get your video.';
           status.className = 'status-success';
 
           // Clean up URL when page unloads
@@ -463,11 +696,129 @@
           status.textContent = `❌ Failed to generate video: ${error.message}`;
           status.className = 'status-error';
           
+          // Stop progress animation
+          stopProgressAnimation();
+          
           // Remove pulse animation if it was added
           downloadLink.classList.remove('pulse');
         }
       }
     });
+
+    // Progress animation functions
+    function startProgressAnimation() {
+      const progressBar = document.getElementById('progress-bar');
+      const progressPercentage = document.getElementById('progress-percentage');
+      const status = document.getElementById('status');
+      
+      status.innerHTML = '<div class="loading-spinner"></div> Generating your video with karaoke subtitles...';
+      status.className = 'status-loading';
+      
+      let progress = 0;
+      const targetProgress = 90; // Stop at 90% until completion
+      
+      progressInterval = setInterval(() => {
+        progress += Math.random() * 5; // Random increment for natural feel
+        if (progress >= targetProgress) {
+          progress = targetProgress;
+        }
+        
+        progressBar.style.width = progress + '%';
+        progressPercentage.textContent = Math.round(progress) + '%';
+        
+        // Update steps based on progress
+        updateProgressSteps(progress);
+        
+        if (progress >= targetProgress) {
+          clearInterval(progressInterval);
+        }
+      }, 500);
+    }
+
+    function completeProgressAnimation() {
+      const progressBar = document.getElementById('progress-bar');
+      const progressPercentage = document.getElementById('progress-percentage');
+      
+      // Complete the progress bar
+      progressBar.style.width = '100%';
+      progressPercentage.textContent = '100%';
+      
+      // Mark all steps as completed
+      completeAllSteps();
+      
+      // Stop any running interval
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+    }
+
+    function stopProgressAnimation() {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+      }
+    }
+
+    function updateProgressSteps(progress) {
+      const steps = [
+        { element: 'step-1', threshold: 25 },
+        { element: 'step-2', threshold: 50 },
+        { element: 'step-3', threshold: 75 },
+        { element: 'step-4', threshold: 90 }
+      ];
+      
+      steps.forEach(step => {
+        const stepElement = document.getElementById(step.element);
+        if (progress >= step.threshold) {
+          stepElement.classList.remove('active');
+          stepElement.classList.add('completed');
+          stepElement.querySelector('.step-icon').classList.remove('pending', 'active');
+          stepElement.querySelector('.step-icon').classList.add('completed');
+          stepElement.querySelector('.step-icon').textContent = '✓';
+        } else if (progress >= step.threshold - 10) {
+          stepElement.classList.add('active');
+          stepElement.classList.remove('completed');
+          stepElement.querySelector('.step-icon').classList.remove('pending', 'completed');
+          stepElement.querySelector('.step-icon').classList.add('active');
+        }
+      });
+    }
+
+    function completeAllSteps() {
+      for (let i = 1; i <= 4; i++) {
+        const stepElement = document.getElementById(`step-${i}`);
+        stepElement.classList.remove('active');
+        stepElement.classList.add('completed');
+        stepElement.querySelector('.step-icon').classList.remove('pending', 'active');
+        stepElement.querySelector('.step-icon').classList.add('completed');
+        stepElement.querySelector('.step-icon').textContent = '✓';
+      }
+    }
+
+    function resetProgressSteps() {
+      for (let i = 1; i <= 4; i++) {
+        const stepElement = document.getElementById(`step-${i}`);
+        stepElement.classList.remove('active', 'completed');
+        stepElement.querySelector('.step-icon').classList.remove('active', 'completed');
+        stepElement.querySelector('.step-icon').classList.add('pending');
+        stepElement.querySelector('.step-icon').textContent = i;
+      }
+    }
+
+    function updateTimeEstimate() {
+      const progressTime = document.getElementById('progress-time');
+      const interval = setInterval(() => {
+        if (!startTime) {
+          clearInterval(interval);
+          return;
+        }
+        
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        
+        progressTime.textContent = `Elapsed: ${minutes}m ${seconds}s`;
+      }, 1000);
+    }
 
     // Add some interactive effects
     document.addEventListener('DOMContentLoaded', function() {
