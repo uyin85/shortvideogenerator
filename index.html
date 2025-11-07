@@ -1,127 +1,484 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Fact Shorts</title>
+  <title>AI Fact Short Video Generator</title>
   <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      max-width: 700px;
-      margin: 20px auto;
-      padding: 0 15px;
-      background: #f9f9f9;
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
     }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      color: #333;
+    }
+
+    .container {
+      background: white;
+      border-radius: 20px;
+      padding: 30px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      color: #2d3748;
+      font-size: 2.5em;
+      font-weight: 700;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: #718096;
+      margin-bottom: 30px;
+      font-size: 1.1em;
+    }
+
+    .category-section {
+      margin-bottom: 30px;
+    }
+
+    .section-title {
+      font-size: 1.3em;
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #2d3748;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-title i {
+      font-size: 1.2em;
+    }
+
     select, button {
       width: 100%;
-      padding: 14px;
-      margin: 12px 0;
-      border: 1px solid #ddd;
-      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 8px 0;
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
       font-size: 16px;
-    }
-    .fact {
-      padding: 14px;
       background: white;
-      margin: 10px 0;
-      border-radius: 8px;
+      transition: all 0.3s ease;
       cursor: pointer;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     }
-    .fact:hover { background: #f0f8ff; }
-    .selected { background: #e6f7ff; border-left: 4px solid #1890ff; }
+
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%234a5568'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 16px center;
+      background-size: 20px;
+      appearance: none;
+    }
+
+    select:hover {
+      border-color: #cbd5e0;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+
+    .fact {
+      padding: 20px;
+      background: #f7fafc;
+      margin: 12px 0;
+      border-radius: 12px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: all 0.3s ease;
+      line-height: 1.5;
+      font-size: 16px;
+      position: relative;
+    }
+
+    .fact:hover {
+      background: #edf2f7;
+      border-color: #e2e8f0;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+
+    .fact.selected {
+      background: #ebf8ff;
+      border-color: #4299e1;
+      border-left: 6px solid #4299e1;
+    }
+
+    .fact-number {
+      position: absolute;
+      top: -10px;
+      left: -10px;
+      background: #4299e1;
+      color: white;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    #facts-list {
+      margin: 20px 0;
+    }
+
+    .facts-title {
+      font-size: 1.2em;
+      font-weight: 600;
+      margin-bottom: 15px;
+      color: #2d3748;
+      text-align: center;
+    }
+
     #status {
-      color: #ff4d4f;
-      margin: 15px 0;
+      padding: 15px;
+      margin: 20px 0;
+      border-radius: 12px;
+      text-align: center;
+      font-weight: 500;
       min-height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
     }
+
+    .status-loading {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeaa7;
+    }
+
+    .status-error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .status-success {
+      background: #d1ecf1;
+      color: #0c5460;
+      border: 1px solid #bee5eb;
+    }
+
     #download-link {
       display: none;
       width: 100%;
-      padding: 14px;
-      background: #52c41a;
+      padding: 18px;
+      background: linear-gradient(135deg, #48bb78, #38a169);
       color: white;
       text-align: center;
       text-decoration: none;
-      border-radius: 8px;
+      border-radius: 12px;
       margin-top: 20px;
-      font-weight: bold;
+      font-weight: 600;
+      font-size: 16px;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(72, 187, 120, 0.3);
     }
-    h1 { text-align: center; margin-bottom: 20px; color: #333; }
+
+    #download-link:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(72, 187, 120, 0.4);
+    }
+
+    .video-section {
+      margin-top: 30px;
+      padding-top: 20px;
+      border-top: 2px solid #e2e8f0;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #ffffff;
+      border-radius: 50%;
+      border-top-color: transparent;
+      animation: spin 1s ease-in-out infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+
+    .feature-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin: 25px 0;
+    }
+
+    .feature {
+      text-align: center;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 10px;
+      font-size: 14px;
+      color: #4a5568;
+    }
+
+    .feature i {
+      font-size: 24px;
+      margin-bottom: 8px;
+      color: #667eea;
+    }
+
+    /* Responsive design */
+    @media (max-width: 600px) {
+      body {
+        padding: 10px;
+      }
+      
+      .container {
+        padding: 20px;
+      }
+      
+      h1 {
+        font-size: 2em;
+      }
+      
+      .feature-list {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Icon styles */
+    .icon {
+      display: inline-block;
+      width: 24px;
+      height: 24px;
+      background-size: contain;
+      background-repeat: no-repeat;
+    }
+
+    .icon-brain { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M12 2a10 10 0 1010 10A10 10 0 0012 2zm0 18a8 8 0 118-8 8 8 0 01-8 8z'/%3E%3Cpath d='M12 6a6 6 0 106 6 6 6 0 00-6-6zm0 10a4 4 0 114-4 4 4 0 01-4 4z'/%3E%3C/svg%3E"); }
+    .icon-video { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z'/%3E%3C/svg%3E"); }
+    .icon-audio { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M12 3v9.28a4.39 4.39 0 00-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z'/%3E%3C/svg%3E"); }
+    .icon-image { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4.86 8.86l-3 3.87L9 13.14 6 17h12l-3.86-5.14z'/%3E%3C/svg%3E"); }
   </style>
 </head>
 <body>
-  <h1>🎬 AI Fact Short Video Generator</h1>
+  <div class="container">
+    <h1>🎬 AI Fact Short Video Generator</h1>
+    <p class="subtitle">Create engaging short videos with AI-generated facts, images, and voice-over</p>
 
-  <select id="category">
-    <option value="">— Choose a Category —</option>
-    <option value="science">5 Facts: Science</option>
-    <option value="successful_person">5 Facts: Successful Person</option>
-    <option value="unsolved_mystery">5 Facts: Unsolved Mystery</option>
-    <option value="history">5 Facts: History to Remember</option>
-    <option value="sports">5 Facts: Sports Legend</option>
-  </select>
+    <div class="feature-list">
+      <div class="feature">
+        <div class="icon icon-brain"></div>
+        <div>AI-Generated Facts</div>
+      </div>
+      <div class="feature">
+        <div class="icon icon-image"></div>
+        <div>AI-Generated Images</div>
+      </div>
+      <div class="feature">
+        <div class="icon icon-audio"></div>
+        <div>Text-to-Speech Voice</div>
+      </div>
+      <div class="feature">
+        <div class="icon icon-video"></div>
+        <div>Auto Video Creation</div>
+      </div>
+    </div>
 
-  <div id="facts-list"></div>
-  <div id="status"></div>
-  <a id="download-link" target="_blank">⬇️ Download Your Video</a>
+    <div class="category-section">
+      <div class="section-title">
+        <div class="icon icon-brain"></div>
+        Choose a Category
+      </div>
+      <select id="category">
+        <option value="">— Select a Category —</option>
+        <option value="science">🔬 Science Facts</option>
+        <option value="successful_person">💼 Successful People</option>
+        <option value="unsolved_mystery">🔍 Unsolved Mysteries</option>
+        <option value="history">📜 History Facts</option>
+        <option value="sports">⚽ Sports Legends</option>
+      </select>
+    </div>
+
+    <div id="facts-list"></div>
+    
+    <div id="status"></div>
+
+    <div class="video-section">
+      <div class="section-title">
+        <div class="icon icon-video"></div>
+        Video Generation
+      </div>
+      <p style="text-align: center; color: #718096; margin-bottom: 15px; font-size: 14px;">
+        Click on any fact above to generate a short video with voice-over
+      </p>
+      <a id="download-link" target="_blank">⬇️ Download Your Video</a>
+    </div>
+  </div>
 
   <script>
     let selectedFact = null;
+    let currentCategory = '';
 
-    document.getElementById('category').addEventListener('change', async () => {
-      const cat = document.getElementById('category').value;
+    // Category selection handler
+    document.getElementById('category').addEventListener('change', async function() {
+      const cat = this.value;
       if (!cat) return;
 
+      currentCategory = cat;
+      selectedFact = null;
+      
       const status = document.getElementById('status');
-      status.textContent = '🧠 AI is generating 5 facts...';
-      const res = await fetch(`/facts?category=${cat}`);
-      const data = await res.json();
+      const factsList = document.getElementById('facts-list');
+      const downloadLink = document.getElementById('download-link');
+
+      // Reset UI
       status.textContent = '';
+      status.className = '';
+      factsList.innerHTML = '';
+      downloadLink.style.display = 'none';
 
-      const list = document.getElementById('facts-list');
-      list.innerHTML = '<h3>✅ Choose One Fact to Turn Into a Video:</h3>';
+      // Show loading
+      status.textContent = '🧠 AI is generating 5 interesting facts...';
+      status.className = 'status-loading';
 
-      if (data.error) {
-        status.textContent = `❌ ${data.error}`;
-        return;
+      try {
+        const response = await fetch(`/facts?category=${cat}`);
+        const data = await response.json();
+
+        if (data.error) {
+          status.textContent = `❌ ${data.error}`;
+          status.className = 'status-error';
+          return;
+        }
+
+        status.textContent = '✅ Facts generated! Choose one to create a video:';
+        status.className = 'status-success';
+
+        // Display facts
+        factsList.innerHTML = '<div class="facts-title">📝 Choose a Fact for Your Video:</div>';
+        
+        data.facts.forEach((fact, index) => {
+          const factDiv = document.createElement('div');
+          factDiv.className = 'fact';
+          factDiv.innerHTML = `
+            <div class="fact-number">${index + 1}</div>
+            ${fact}
+          `;
+          
+          factDiv.onclick = () => {
+            // Remove selected class from all facts
+            document.querySelectorAll('.fact').forEach(el => {
+              el.classList.remove('selected');
+            });
+            
+            // Add selected class to clicked fact
+            factDiv.classList.add('selected');
+            selectedFact = fact;
+            
+            // Show video generation hint
+            const status = document.getElementById('status');
+            status.textContent = '✅ Fact selected! The video will include voice-over reading this text.';
+            status.className = 'status-success';
+          };
+          
+          factsList.appendChild(factDiv);
+        });
+
+      } catch (error) {
+        status.textContent = `❌ Failed to load facts: ${error.message}`;
+        status.className = 'status-error';
       }
-
-      data.facts.forEach(fact => {
-        const div = document.createElement('div');
-        div.className = 'fact';
-        div.textContent = fact;
-        div.onclick = () => {
-          document.querySelectorAll('.fact').forEach(el => el.classList.remove('selected'));
-          div.classList.add('selected');
-          selectedFact = fact;
-        };
-        list.appendChild(div);
-      });
     });
 
-    document.body.addEventListener('click', async (e) => {
+    // Video generation handler
+    document.addEventListener('click', async (e) => {
       if (e.target.classList.contains('fact') && selectedFact) {
         const status = document.getElementById('status');
-        const link = document.getElementById('download-link');
-        status.textContent = '🎥 Generating your short video... (30-50 sec)';
-        link.style.display = 'none';
+        const downloadLink = document.getElementById('download-link');
+        
+        // Reset download link
+        downloadLink.style.display = 'none';
+        
+        // Show video generation status
+        status.innerHTML = '<div class="loading-spinner"></div> Generating your short video with voice-over... (30-60 seconds)';
+        status.className = 'status-loading';
 
         try {
-          const url = `/generate_video?fact=${encodeURIComponent(selectedFact)}`;
-          const blob = await fetch(url).then(r => {
-            if (!r.ok) throw new Error("Server error during video generation");
-            return r.blob();
-          });
+          const url = `/generate_video?fact=${encodeURIComponent(selectedFact)}&category=${currentCategory}`;
+          const response = await fetch(url);
+          
+          if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || `Server error: ${response.status}`);
+          }
+
+          // Get the video blob
+          const blob = await response.blob();
+          
+          if (blob.size === 0) {
+            throw new Error("Empty video file generated");
+          }
+
+          // Create download link
           const videoUrl = URL.createObjectURL(blob);
-          link.href = videoUrl;
-          link.style.display = 'block';
-          link.textContent = '✅ Download Your Fact Video!';
-          status.textContent = '🎉 Done! Tap below to save.';
-        } catch (err) {
-          status.textContent = `❌ Failed: ${err.message}`;
+          downloadLink.href = videoUrl;
+          downloadLink.style.display = 'block';
+          downloadLink.textContent = '🎬 Download Video with Voice-over';
+          downloadLink.classList.add('pulse');
+          
+          status.innerHTML = '✅ Video generated successfully! Click download to get your video with voice-over.';
+          status.className = 'status-success';
+
+          // Clean up URL when page unloads
+          window.addEventListener('beforeunload', () => {
+            URL.revokeObjectURL(videoUrl);
+          });
+
+        } catch (error) {
+          console.error('Video generation error:', error);
+          status.textContent = `❌ Failed to generate video: ${error.message}`;
+          status.className = 'status-error';
+          
+          // Remove pulse animation if it was added
+          downloadLink.classList.remove('pulse');
         }
       }
+    });
+
+    // Add some interactive effects
+    document.addEventListener('DOMContentLoaded', function() {
+      const factsList = document.getElementById('facts-list');
+      
+      // Add hover effect instructions
+      factsList.addEventListener('mouseover', function(e) {
+        if (e.target.classList.contains('fact') && !e.target.classList.contains('selected')) {
+          e.target.style.cursor = 'pointer';
+        }
+      });
     });
   </script>
 </body>
