@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ai-fact-video-generator
+    env: python
+    plan: free
+    buildCommand: |
+      pip install -r requirements.txt
+      sudo apt-get update
+      sudo apt-get install -y ffmpeg espeak festival
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
