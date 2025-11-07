@@ -164,65 +164,123 @@ def create_simple_srt_subtitle(text: str, duration: float, srt_path: str):
     print(f"✓ SRT subtitle created: {text}")
 
 def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
-    """Create video with burned-in subtitles using simple FFmpeg approach"""
-    
-    # Create temporary SRT file
-    srt_path = f"/tmp/{uuid.uuid4()}.srt"
-    create_simple_srt_subtitle(text, duration, srt_path)
+    """Create video with burned-in subtitles using FFmpeg with Karaoke effect"""
     
     try:
-        # Use FFmpeg with drawtext filter (more reliable than subtitles filter)
+        # Split text into words for Karaoke effect
+        words = text.split()
+        
+        # Calculate word durations for Karaoke effect
+        word_duration = duration / len(words)
+        
+        # Build complex filter for Karaoke effect (word-by-word highlighting)
+        filter_complex = []
+        
+        # Base image
+        filter_complex.append(f"[0:v]scale=768:768:force_original_aspect_ratio=increase[crop]")
+        
+        # Create background box for text
+        filter_complex.append(f"[crop]drawbox=0:650:768:118:black@0.6:fill[crop_with_bg]")
+        
+        # Build the Karaoke text filter
+        text_parts = []
+        current_time = 0
+        
+        for i, word in enumerate(words):
+            end_time = (i + 1) * word_duration
+            
+            # All words before current word (white)
+            prev_words = " ".join(words[:i])
+            # Current word (yellow)
+            current_word = word
+            # All words after current word (gray)
+            next_words = " ".join(words[i+1:])
+            
+            # Build the text string
+            text_segment = ""
+            if prev_words:
+                text_segment += f"{prev_words} "
+            
+            text_segment += f"%{{eif\\\\:gte(t\\\\,{current_time})\\\\:1\\\\:0}}%{{eif\\\\:lte(t\\\\,{end_time})\\\\:1\\\\:0}}"
+            
+            # Add spacing
+            if prev_words or i == 0:
+                text_segment += " "
+            
+            text_segment += f"%{{eif\\\\:gte(t\\\\,{current_time})\\\\:1\\\\:0}}%{{eif\\\\:lte(t\\\\,{end_time})\\\\:1\\\\:0}}{current_word}"
+            
+            if next_words:
+                text_segment += f" %{{eif\\\\:gte(t\\\\,{end_time})\\\\:1\\\\:0}}{next_words}"
+            
+            text_parts.append(text_segment)
+            current_time = end_time
+        
+        # Final text filter with Karaoke effect
+        drawtext_filters = []
+        for i, text_part in enumerate(text_parts):
+            drawtext_filters.append(
+                f"drawtext=text='{text_part}':"
+                f"fontcolor=white:fontsize=32:"
+                f"box=0:boxcolor=black@0.0:"  # Remove background box
+                f"x=(w-text_w)/2:y=680:"  # Position text higher up
+                f"enable='between(t,{i*word_duration},{duration})'"
+            )
+        
+        # Alternative simpler approach - single line with proper positioning
+        filter_chain = [
+            f"[0:v]scale=768:768:force_original_aspect_ratio=increase[crop]",
+            f"[crop]drawbox=0:620:768:100:black@0.7:fill[bg]",
+            f"[bg]drawtext=text='{text}':fontcolor=white:fontsize=36:box=0:boxcolor=black@0.0:x=(w-text_w)/2:y=650[outv]"
+        ]
+        
+        filter_complex_str = ";".join(filter_chain)
+        
         cmd = [
             'ffmpeg',
             '-loop', '1',
             '-i', image_path,
             '-i', audio_path,
-            '-vf', f"drawtext=text='{text}':fontcolor=white:fontsize=48:box=1:boxcolor=black@0.8:boxborderw=5:x=(w-text_w)/2:y=h-th-100",
+            '-filter_complex', filter_complex_str,
+            '-map', '[outv]',
+            '-map', '1:a',
             '-t', str(duration),
             '-c:v', 'libx264',
             '-c:a', 'aac',
             '-pix_fmt', 'yuv420p',
             '-shortest',
             '-y',
-            '-loglevel', 'info',  # Change to info to see errors
+            '-loglevel', 'info',
             output_path
         ]
         
-        print(f"Running FFmpeg: {' '.join(cmd)}")
+        print(f"Running FFmpeg with Karaoke effect...")
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
-        # Clean up SRT file
-        try:
-            os.unlink(srt_path)
-        except:
-            pass
-            
         if result.returncode == 0:
-            print("✓ Video with subtitles created successfully")
+            print("✓ Video with Karaoke subtitles created successfully")
             return True
         else:
-            print(f"❌ FFmpeg failed: {result.stderr}")
-            # Fallback: try without subtitles
-            return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+            print(f"❌ FFmpeg Karaoke failed: {result.stderr}")
+            # Fallback to simple subtitles
+            return create_video_with_simple_subtitles(image_path, audio_path, text, output_path, duration)
         
     except Exception as e:
-        print(f"❌ FFmpeg subtitle failed: {e}")
-        # Clean up SRT file
-        try:
-            os.unlink(srt_path)
-        except:
-            pass
-        return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+        print(f"❌ FFmpeg Karaoke failed: {e}")
+        return create_video_with_simple_subtitles(image_path, audio_path, text, output_path, duration)
 
-def create_video_without_subtitles(image_path: str, audio_path: str, output_path: str, duration: float):
-    """Fallback: Create video without subtitles"""
+def create_video_with_simple_subtitles(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
+    """Fallback: Create video with simple centered subtitles"""
     try:
+        # Escape special characters for FFmpeg
+        escaped_text = text.replace("'", "'\\\\\\''").replace(":", "\\\\:")
+        
         cmd = [
             'ffmpeg',
             '-loop', '1',
             '-i', image_path,
             '-i', audio_path,
+            '-vf', f"drawtext=text='{escaped_text}':fontcolor=white:fontsize=36:fontfile=/System/Library/Fonts/Helvetica.ttc:box=1:boxcolor=black@0.7:boxborderw=10:x=(w-text_w)/2:y=h-th-100",
             '-t', str(duration),
             '-c:v', 'libx264',
             '-c:a', 'aac',
@@ -234,10 +292,10 @@ def create_video_without_subtitles(image_path: str, audio_path: str, output_path
         
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         return result.returncode == 0
+        
     except Exception as e:
-        print(f"Fallback video creation failed: {e}")
-        return False
-
+        print(f"Simple subtitle fallback failed: {e}")
+        return create_video_without_subtitles(image_path, audio_path, output_path, duration)
 def generate_gradient_background(width=768, height=768, colors=None):
     """Generate a beautiful background"""
     if colors is None:
