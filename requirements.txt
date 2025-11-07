@@ -7,3 +7,4 @@ gtts
 aiofiles
 numpy
 pyttsx3
+groq
