@@ -7,15 +7,14 @@ import urllib.parse
 import uuid
 import os
 import subprocess
-import aiofiles
 import random
 from PIL import Image, ImageDraw
-import time
 import pyttsx3
 
+# --- CONFIGURATION ---
 app = FastAPI(title="AI Fact Short Video Generator")
 
-# Add CORS middleware
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,432 +23,238 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve static files
-app.mount("/static", StaticFiles(directory="."), name="static")
+# Optional: serve static files (e.g., index.html)
+if os.path.exists("index.html"):
+    app.mount("/static", StaticFiles(directory="."), name="static")
 
+# Groq for fact generation (voice is offline via pyttsx3)
+from groq import Groq
+groq_client = None
+if os.getenv("GROQ_API_KEY"):
+    try:
+        groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
+    except Exception as e:
+        print(f"Groq init warning: {e}")
+
+# Prompts
 PROMPTS = {
-    "science": "Give me 5 short surprising science facts. One sentence each, under 15 words. Make them interesting and educational.",
-    "successful_person": "Give me 5 short inspiring facts about successful people. One sentence each, under 15 words. Make them motivational.",
-    "unsolved_mystery": "Give me 5 short unsolved mysteries. One sentence each, under 15 words. Make them intriguing.",
-    "history": "Give me 5 short memorable history facts. One sentence each, under 15 words. Make them fascinating.",
-    "sports": "Give me 5 short legendary sports facts. One sentence each, under 15 words. Make them exciting."
+    "science": "Give me 5 short surprising science facts. One sentence each, under 15 words.",
+    "successful_person": "Give me 5 short inspiring facts about successful people. One sentence each, under 15 words.",
+    "unsolved_mystery": "Give me 5 short unsolved mysteries. One sentence each, under 15 words.",
+    "history": "Give me 5 short memorable history facts. One sentence each, under 15 words.",
+    "sports": "Give me 5 short legendary sports facts. One sentence each, under 15 words."
 }
 
-# Background colors
 CATEGORY_COLORS = {
-    "science": ["#4A90E2", "#50E3C2", "#9013FE", "#417505"],
-    "successful_person": ["#F5A623", "#BD10E0", "#7ED321", "#B8E986"],
-    "unsolved_mystery": ["#8B572A", "#4A4A4A", "#9B9B9B", "#D0021B"],
-    "history": ["#8B4513", "#CD853F", "#D2691E", "#A0522D"],
-    "sports": ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
+    "science": ["#4A90E2", "#50E3C2"],
+    "successful_person": ["#F5A623", "#BD10E0"],
+    "unsolved_mystery": ["#8B572A", "#4A4A4A"],
+    "history": ["#8B4513", "#CD853F"],
+    "sports": ["#FF6B6B", "#4ECDC4"]
 }
+
+# --- HELPER FUNCTIONS ---
+
+def wrap_text_for_ffmpeg(text: str, max_chars_per_line: int = 30) -> str:
+    words = text.split()
+    lines = []
+    current_line = ""
+    for word in words:
+        if len(word) > max_chars_per_line:
+            if current_line:
+                lines.append(current_line)
+                current_line = ""
+            for i in range(0, len(word), max_chars_per_line):
+                lines.append(word[i:i+max_chars_per_line])
+        elif len(current_line) + len(word) + (1 if current_line else 0) <= max_chars_per_line:
+            current_line = f"{current_line} {word}".strip()
+        else:
+            if current_line:
+                lines.append(current_line)
+            current_line = word
+    if current_line:
+        lines.append(current_line)
+    return "\\n".join(lines).replace("'", "'\\\\\\''").replace(":", "\\\\:")  # FFmpeg-safe
+
 
 def generate_facts_with_groq(category: str):
-    """Generate facts using Groq API with llama-3.1-8b-instant"""
+    if not groq_client:
+        return None
     try:
-        print(f"Generating facts for {category} using Groq...")
-        
         prompt = PROMPTS.get(category, PROMPTS["science"])
-        
         response = groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful assistant that generates interesting, concise facts. Always return exactly 5 facts, one per line, without numbers or bullet points."
-                },
-                {
-                    "role": "user", 
-                    "content": prompt
-                }
+                {"role": "system", "content": "Return exactly 5 facts, one per line, no bullets, no numbers."},
+                {"role": "user", "content": prompt}
             ],
             max_tokens=300,
             temperature=0.8
         )
-        
-        facts_text = response.choices[0].message.content.strip()
-        print(f"Raw Groq response: {facts_text}")
-        
-        # Parse the facts - split by newlines and clean
-        lines = facts_text.split('\n')
+        lines = response.choices[0].message.content.strip().split("\n")
         facts = []
-        
         for line in lines:
-            cleaned = line.strip()
-            # Remove numbers, bullets, and other prefixes
-            for prefix in ["•", "-", "—", "–", "—", "1.", "2.", "3.", "4.", "5."]:
-                if cleaned.startswith(prefix):
-                    cleaned = cleaned[len(prefix):].strip()
-            
-            # Remove quotes and other common formatting
-            cleaned = cleaned.strip('"').strip("'").strip()
-            
-            if 10 < len(cleaned) < 120 and cleaned:
+            cleaned = line.strip().strip("\"'•-—12345.")
+            if 10 < len(cleaned) < 120:
                 facts.append(cleaned)
-            
             if len(facts) >= 5:
                 break
-        
-        print(f"Parsed {len(facts)} facts: {facts}")
-        return facts[:5]
-        
+        return facts[:5] or None
     except Exception as e:
-        print(f"Groq facts generation failed: {e}")
+        print(f"Groq fact gen failed: {e}")
         return None
 
+
+def generate_facts_fallback(category: str):
+    defaults = {
+        "science": [
+            "Bananas are naturally radioactive.",
+            "Octopuses have three hearts.",
+            "Honey never spoils.",
+            "Venus rotates backward.",
+            "Your stomach acid can dissolve metal."
+        ]
+    }
+    return defaults.get(category, defaults["science"])
+
+
 def generate_audio_with_pyttsx3(text: str, audio_path: str):
-    """Generate audio using pyttsx3 (offline TTS)"""
     try:
-        print(f"Generating audio with pyttsx3: '{text}'")
-        
-        # Initialize the TTS engine
         engine = pyttsx3.init()
-        
-        # Configure voice properties
+        engine.setProperty('rate', 180)
+        engine.setProperty('volume', 1.0)
         voices = engine.getProperty('voices')
-        
-        # Try to use a female voice if available, otherwise use default
-        for voice in voices:
-            if 'female' in voice.name.lower() or 'zira' in voice.name.lower():
-                engine.setProperty('voice', voice.id)
-                break
-        
-        # Set speech rate (words per minute)
-        engine.setProperty('rate', 180)  # Slightly faster than default
-        
-        # Set volume
-        engine.setProperty('volume', 0.8)
-        
-        # Save to temporary WAV file first
-        temp_wav = audio_path.replace('.mp3', '.wav')
-        engine.save_to_file(text, temp_wav)
+        if voices:
+            engine.setProperty('voice', voices[0].id)
+
+        wav_path = audio_path.replace(".mp3", ".wav")
+        engine.save_to_file(text, wav_path)
         engine.runAndWait()
-        
-        # Check if WAV file was created
-        if os.path.exists(temp_wav) and os.path.getsize(temp_wav) > 1000:
-            # Convert WAV to MP3 using ffmpeg
+        engine.stop()
+
+        if os.path.exists(wav_path):
             subprocess.run([
-                "ffmpeg",
-                "-i", temp_wav,
-                "-codec:a", "libmp3lame",
-                "-qscale:a", "2",
-                audio_path,
-                "-y",
-                "-loglevel", "error"
-            ], capture_output=True, timeout=30)
-            
-            # Clean up WAV file
-            try:
-                os.unlink(temp_wav)
-            except:
-                pass
-            
-            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-                print(f"✓ pyttsx3 audio generated: {os.path.getsize(audio_path)} bytes")
-                return True
-        
-        print("❌ pyttsx3 audio file creation failed")
-        return False
-        
+                "ffmpeg", "-i", wav_path,
+                "-acodec", "libmp3lame", "-b:a", "128k",
+                audio_path, "-y", "-loglevel", "error"
+            ], timeout=30)
+            os.unlink(wav_path)
+            return os.path.getsize(audio_path) > 1000
     except Exception as e:
-        print(f"❌ pyttsx3 TTS failed: {e}")
-        return False
+        print(f"TTS error: {e}")
+    return False
 
-def get_audio_duration(audio_path: str) -> float:
-    """Get duration of audio file in seconds"""
+
+def create_video(image_path, audio_path, text, output_path, duration):
+    font_part = ""
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    if os.path.exists(font_path):
+        font_part = f"fontfile={font_path}:"
+
+    filter_str = (
+        f"[0:v]scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1/1[bg];"
+        f"[bg]drawtext=text='{text}':fontcolor=white:fontsize=28:{font_part}"
+        f"box=1:boxcolor=black@0.6:boxborderw=12:x=(w-text_w)/2:y=h-text_h-80[outv]"
+    )
+
+    cmd = [
+        "ffmpeg", "-loop", "1", "-i", image_path,
+        "-i", audio_path,
+        "-filter_complex", filter_str,
+        "-map", "[outv]", "-map", "1:a",
+        "-t", str(duration), "-c:v", "libx264", "-c:a", "aac",
+        "-pix_fmt", "yuv420p", "-shortest", "-y", "-loglevel", "error",
+        output_path
+    ]
+    return subprocess.run(cmd, timeout=60).returncode == 0
+
+
+def generate_image_pollinations(prompt, path):
     try:
-        result = subprocess.run([
-            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-            '-of', 'default=noprint_wrappers=1:nokey=1', audio_path
-        ], capture_output=True, text=True, timeout=10)
-        
-        if result.returncode == 0:
-            return float(result.stdout.strip())
-        return 5.0  # Default fallback
-    except:
-        return 5.0  # Default fallback
-
-def format_time(seconds: float) -> str:
-    """Convert seconds to SRT time format: HH:MM:SS,mmm"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    milliseconds = int((secs - int(secs)) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{milliseconds:03d}"
-
-def create_simple_srt_subtitle(text: str, duration: float, srt_path: str):
-    """Create simple SRT subtitle that displays throughout the video"""
-    srt_content = f"""1
-{format_time(0)} --> {format_time(duration)}
-{text}
-"""
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(srt_content)
-    print(f"✓ SRT subtitle created: {text}")
-
-def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
-    """Create video with properly positioned subtitles"""
-    
-    try:
-        # Escape text for FFmpeg and break into multiple lines if too long
-        safe_text = text.replace("'", "'\\\\\\''").replace('"', '\\\\"')
-        
-        # Simple approach - break text into 2 lines if too long
-        words = text.split()
-        if len(words) > 8:
-            mid = len(words) // 2
-            line1 = " ".join(words[:mid])
-            line2 = " ".join(words[mid:])
-            safe_text = f"{line1}\\\\n{line2}"
-        
-        cmd = [
-            'ffmpeg',
-            '-loop', '1',
-            '-i', image_path,
-            '-i', audio_path,
-            '-vf', f"drawtext=text='{safe_text}':fontcolor=white:fontsize=36:box=1:boxcolor=black@0.7:boxborderw=10:x=(w-text_w)/2:y=150",
-            '-t', str(duration),
-            '-c:v', 'libx264',
-            '-c:a', 'aac',
-            '-pix_fmt', 'yuv420p',
-            '-shortest',
-            '-y',
-            '-loglevel', 'info',
-            output_path
-        ]
-        
-        print(f"Running FFmpeg with subtitles...")
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode == 0:
-            print("✓ Video with subtitles created successfully")
+        url = f"https://pollinations.ai/p/{urllib.parse.quote(prompt)}?width=768&height=768&nologo=true"
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            with open(path, "wb") as f:
+                f.write(resp.content)
             return True
-        else:
-            print(f"❌ FFmpeg subtitles failed: {result.stderr}")
-            return create_video_without_subtitles(image_path, audio_path, output_path, duration)
-        
     except Exception as e:
-        print(f"❌ FFmpeg subtitles failed: {e}")
-        return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+        print(f"Pollinations failed: {e}")
+    return False
 
-def create_video_without_subtitles(image_path: str, audio_path: str, output_path: str, duration: float):
-    """Fallback: Create video without subtitles"""
-    try:
-        cmd = [
-            'ffmpeg',
-            '-loop', '1',
-            '-i', image_path,
-            '-i', audio_path,
-            '-t', str(duration),
-            '-c:v', 'libx264',
-            '-c:a', 'aac',
-            '-pix_fmt', 'yuv420p',
-            '-shortest',
-            '-y',
-            output_path
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        return result.returncode == 0
-    except Exception as e:
-        print(f"Fallback video creation failed: {e}")
-        return False
 
-def generate_gradient_background(width=768, height=768, colors=None):
-    """Generate a beautiful background"""
-    if colors is None:
-        colors = ["#4A90E2", "#50E3C2"]
-    
-    bg_color = colors[0]
-    image = Image.new('RGB', (width, height), bg_color)
-    draw = ImageDraw.Draw(image)
-    
-    # Add visual elements
+def generate_image_placeholder(prompt, path, category="science"):
+    width, height = 768, 768
+    colors = CATEGORY_COLORS.get(category, ["#4A90E2", "#50E3C2"])
+    img = Image.new("RGB", (width, height), colors[0])
+    draw = ImageDraw.Draw(img)
     for _ in range(5):
         x = random.randint(0, width)
         y = random.randint(0, height)
-        radius = random.randint(50, 200)
-        color = random.choice(colors[1:]) if len(colors) > 1 else colors[0]
-        draw.ellipse([x-radius, y-radius, x+radius, y+radius], fill=color, width=0)
-    
-    return image
+        r = random.randint(50, 200)
+        draw.ellipse([x-r, y-r, x+r, y+r], fill=random.choice(colors[1:]), width=0)
+    img.save(path, "JPEG", quality=85)
+    return True
 
-def generate_image_pollinations(text: str, img_path: str):
-    """Try Pollinations.ai for image generation"""
-    try:
-        print("Trying Pollinations.ai...")
-        encoded = urllib.parse.quote(text)
-        img_url = f"https://pollinations.ai/p/{encoded}?width=768&height=768&nologo=true"
-        
-        response = requests.get(img_url, timeout=30)
-        if response.status_code == 200:
-            with open(img_path, "wb") as f:
-                f.write(response.content)
-            print("✓ Pollinations.ai image generated")
-            return True
-        else:
-            print(f"✗ Pollinations.ai failed with status: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"✗ Pollinations.ai error: {e}")
-        return False
 
-def generate_image_placeholder(text: str, img_path: str, category="science"):
-    """Generate a beautiful placeholder image"""
-    try:
-        print("Generating placeholder image...")
-        width, height = 768, 768
-        colors = CATEGORY_COLORS.get(category, CATEGORY_COLORS["science"])
-        
-        image = generate_gradient_background(width, height, colors)
-        draw = ImageDraw.Draw(image)
-        
-        # Add a central circle
-        center_x, center_y = width // 2, height // 2
-        circle_radius = 200
-        draw.ellipse([
-            center_x - circle_radius, center_y - circle_radius,
-            center_x + circle_radius, center_y + circle_radius
-        ], outline="white", width=5)
-        
-        image.save(img_path, "JPEG", quality=85)
-        print("✓ Placeholder image generated")
-        return True
-        
-    except Exception as e:
-        print(f"✗ Placeholder image failed: {e}")
-        return False
-
-def generate_silent_audio(duration: int, audio_path: str):
-    """Generate silent audio as last resort"""
-    try:
-        print(f"Generating silent audio ({duration}s)...")
-        result = subprocess.run([
-            "ffmpeg",
-            "-f", "lavfi",
-            "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
-            "-t", str(duration),
-            "-c:a", "libmp3lame",
-            audio_path,
-            "-y",
-            "-loglevel", "error"
-        ], capture_output=True, timeout=30)
-        
-        success = os.path.exists(audio_path) and os.path.getsize(audio_path) > 0
-        if success:
-            print("✓ Silent audio generated")
-        return success
-        
-    except Exception as e:
-        print(f"Silent audio failed: {e}")
-        return False
+# --- ENDPOINTS ---
 
 @app.get("/")
-async def home():
-    return FileResponse("index.html")
+def home():
+    if os.path.exists("index.html"):
+        return FileResponse("index.html")
+    return {"message": "AI Fact Video Generator - Ready"}
+
 
 @app.get("/facts")
-async def get_facts(category: str):
+def get_facts(category: str):
     if category not in PROMPTS:
-        return {"error": "Invalid category"}
+        raise HTTPException(400, "Invalid category")
+    facts = generate_facts_with_groq(category) or generate_facts_fallback(category)
+    return {"facts": facts}
 
-    try:
-        # Use Groq API to generate facts
-        facts = generate_facts_with_groq(category)
-        
-        if not facts or len(facts) == 0:
-            return {"error": "Failed to generate facts with AI"}
-        
-        return {"facts": facts[:5]}
-        
-    except Exception as e:
-        print(f"Facts generation error: {e}")
-        return {"error": f"Failed to fetch facts: {str(e)}"}
 
 @app.get("/generate_video")
-async def generate_video(fact: str, category: str = "science"):
-    try:
-        safe_fact = fact.strip()
-        if len(safe_fact) > 300:
-            safe_fact = safe_fact[:300]
+def generate_video(fact: str, category: str = "science"):
+    safe_fact = fact.strip()[:300]
+    img_path = f"/tmp/{uuid.uuid4()}.jpg"
+    audio_path = f"/tmp/{uuid.uuid4()}.mp3"
+    output_path = f"/tmp/{uuid.uuid4()}.mp4"
 
-        print(f"🎬 Generating video for: '{safe_fact}'")
+    # Image
+    if not (generate_image_pollinations(safe_fact, img_path) or generate_image_placeholder(safe_fact, img_path, category)):
+        raise HTTPException(500, "Image generation failed")
 
-        # Generate image using multiple fallbacks
-        print("🖼️  Step 1: Generating image...")
-        img_path = f"/tmp/{uuid.uuid4()}.jpg"
-        image_generated = False
-        
-        # Try multiple image sources
-        if generate_image_pollinations(safe_fact, img_path):
-            image_generated = True
-        elif generate_image_placeholder(safe_fact, img_path, category):
-            image_generated = True
-        
-        if not image_generated:
-            raise HTTPException(status_code=500, detail="All image generation methods failed")
+    # Audio (offline TTS)
+    duration = max(len(safe_fact.split()) * 0.4, 4.0)
+    if not generate_audio_with_pyttsx3(safe_fact, audio_path):
+        # Fallback to silent
+        subprocess.run([
+            "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+            "-t", str(int(duration)), "-q:a", "0", "-c:a", "libmp3lame",
+            audio_path, "-y", "-loglevel", "error"
+        ], timeout=30)
 
-        # Generate audio with pyttsx3 (OFFLINE TTS)
-        print("🔊 Step 2: Generating VOICE-OVER audio with pyttsx3...")
-        audio_path = f"/tmp/{uuid.uuid4()}.mp3"
-        audio_generated = generate_audio_with_pyttsx3(safe_fact, audio_path)
-        
-        print(f"🎯 pyttsx3 TTS result: {audio_generated}")
+    # Video
+    wrapped = wrap_text_for_ffmpeg(safe_fact, 30)
+    if not create_video(img_path, audio_path, wrapped, output_path, duration):
+        raise HTTPException(500, "Video creation failed")
 
-        # Calculate duration
-        duration = 5  # Default duration
-        
-        if audio_generated:
-            duration = get_audio_duration(audio_path)
-            print(f"⏱️  Audio duration: {duration:.2f} seconds")
-        else:
-            # Fallback: estimate duration based on word count
-            duration = max(len(safe_fact.split()) / 2, 5)
-            print(f"⏱️  Estimated duration: {duration} seconds (NO VOICE-OVER)")
-            generate_silent_audio(duration, audio_path)
+    # Cleanup & stream
+    for p in [img_path, audio_path]:
+        if os.path.exists(p):
+            os.unlink(p)
 
-        # Create video with FFmpeg and burned-in subtitles
-        print("🎥 Step 3: Creating video with SUBTITLES...")
-        output_path = f"/tmp/{uuid.uuid4()}.mp4"
-        
-        video_created = create_video_with_subtitles_simple(
-            img_path, 
-            audio_path, 
-            safe_fact, 
-            output_path, 
-            duration
-        )
-        
-        if not video_created:
-            raise HTTPException(status_code=500, detail="Video creation failed")
+    def iterfile():
+        with open(output_path, "rb") as f:
+            yield from f
+        if os.path.exists(output_path):
+            os.unlink(output_path)
 
-        print("✅ Video with SUBTITLES created successfully!")
+    return StreamingResponse(iterfile(), media_type="video/mp4")
 
-        # Cleanup temporary files
-        for temp_file in [img_path, audio_path]:
-            if temp_file and os.path.exists(temp_file):
-                try:
-                    os.unlink(temp_file)
-                except:
-                    pass
 
-        def iterfile():
-            with open(output_path, "rb") as f:
-                yield from f
-            # Clean up video file after streaming
-            try:
-                os.unlink(output_path)
-            except:
-                pass
-        
-        print("🎉 Video with SUBTITLES ready for streaming!")
-        return StreamingResponse(iterfile(), media_type="video/mp4")
-
-    except Exception as e:
-        print(f"❌ Video generation failed: {e}")
-        return {"error": f"Video generation failed: {str(e)}"}
-
+# --- Render.com requires this ---
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
