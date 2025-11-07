@@ -13,10 +13,19 @@ from PIL import Image, ImageDraw
 import time
 from groq import Groq
 
+# --- CONFIGURATION ---
+
+# IMPORTANT: Ensure you set the GROQ_API_KEY environment variable.
+
 app = FastAPI(title="AI Fact Short Video Generator")
 
 # Initialize Groq client
-groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+# This requires GROQ_API_KEY environment variable to be set
+try:
+    groq_client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+except Exception as e:
+    print(f"Warning: Groq client initialization failed. Check GROQ_API_KEY. Error: {e}")
+    groq_client = None
 
 # Add CORS middleware
 app.add_middleware(
@@ -47,8 +56,40 @@ CATEGORY_COLORS = {
     "sports": ["#FF6B6B", "#4ECDC4", "#45B7D1", "#96CEB4"]
 }
 
+# --- HELPER FUNCTIONS ---
+
+def wrap_text_for_ffmpeg(text: str, max_chars_per_line: int = 30) -> str:
+    """
+    Splits long text into lines using '\\n' for FFmpeg's drawtext filter
+    to prevent horizontal overflow in a short video format.
+    """
+    words = text.split()
+    lines = []
+    current_line = ""
+    
+    for word in words:
+        # Check if adding the word exceeds the max length
+        if len(current_line) + len(word) + 1 > max_chars_per_line and current_line:
+            lines.append(current_line)
+            current_line = word
+        else:
+            # Append word to current line
+            current_line = (current_line + " " + word).strip()
+            
+    lines.append(current_line) # Add the last line
+    
+    # FFmpeg requires two backslashes for a literal newline
+    # Also escape single quotes and colons for FFmpeg
+    escaped_text = '\\n'.join(lines).replace("'", "'\\\\\\''").replace(":", "\\\\:")
+    
+    return escaped_text
+
+
 def generate_facts_with_groq(category: str):
     """Generate facts using Groq API with llama-3.1-8b-instant"""
+    if not groq_client:
+        print("Groq client not initialized.")
+        return None
     try:
         print(f"Generating facts for {category} using Groq...")
         
@@ -102,6 +143,9 @@ def generate_facts_with_groq(category: str):
 
 def generate_audio_with_groq(text: str, audio_path: str):
     """Generate audio using Groq TTS API"""
+    if not groq_client:
+        print("Groq client not initialized. Cannot generate audio.")
+        return False
     try:
         print(f"Generating audio with Groq TTS: '{text}'")
         
@@ -145,95 +189,27 @@ def generate_audio_with_groq(text: str, audio_path: str):
         print(f"❌ Groq TTS failed: {e}")
         return False
 
-def format_time(seconds: float) -> str:
-    """Convert seconds to SRT time format: HH:MM:SS,mmm"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    milliseconds = int((secs - int(secs)) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{int(secs):02d},{milliseconds:03d}"
-
-def create_simple_srt_subtitle(text: str, duration: float, srt_path: str):
-    """Create simple SRT subtitle that displays throughout the video"""
-    srt_content = f"""1
-{format_time(0)} --> {format_time(duration)}
-{text}
-"""
-    with open(srt_path, 'w', encoding='utf-8') as f:
-        f.write(srt_content)
-    print(f"✓ SRT subtitle created: {text}")
-
-def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
-    """Create video with burned-in subtitles using FFmpeg with Karaoke effect"""
-    
+def create_video_with_simple_subtitles(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
+    """
+    Creates video with simple centered subtitles (static text).
+    This function replaces the original complex and failing Karaoke logic.
+    """
     try:
-        # Split text into words for Karaoke effect
-        words = text.split()
+        # Text is already escaped and wrapped by the calling function.
+        escaped_wrapped_text = text 
         
-        # Calculate word durations for Karaoke effect
-        word_duration = duration / len(words)
+        # We will use a smaller font size (30) to better accommodate two lines of text.
+        # The y position 'h-th-100' dynamically places the text 100 pixels from the bottom.
         
-        # Build complex filter for Karaoke effect (word-by-word highlighting)
-        filter_complex = []
-        
-        # Base image
-        filter_complex.append(f"[0:v]scale=768:768:force_original_aspect_ratio=increase[crop]")
-        
-        # Create background box for text
-        filter_complex.append(f"[crop]drawbox=0:650:768:118:black@0.6:fill[crop_with_bg]")
-        
-        # Build the Karaoke text filter
-        text_parts = []
-        current_time = 0
-        
-        for i, word in enumerate(words):
-            end_time = (i + 1) * word_duration
-            
-            # All words before current word (white)
-            prev_words = " ".join(words[:i])
-            # Current word (yellow)
-            current_word = word
-            # All words after current word (gray)
-            next_words = " ".join(words[i+1:])
-            
-            # Build the text string
-            text_segment = ""
-            if prev_words:
-                text_segment += f"{prev_words} "
-            
-            text_segment += f"%{{eif\\\\:gte(t\\\\,{current_time})\\\\:1\\\\:0}}%{{eif\\\\:lte(t\\\\,{end_time})\\\\:1\\\\:0}}"
-            
-            # Add spacing
-            if prev_words or i == 0:
-                text_segment += " "
-            
-            text_segment += f"%{{eif\\\\:gte(t\\\\,{current_time})\\\\:1\\\\:0}}%{{eif\\\\:lte(t\\\\,{end_time})\\\\:1\\\\:0}}{current_word}"
-            
-            if next_words:
-                text_segment += f" %{{eif\\\\:gte(t\\\\,{end_time})\\\\:1\\\\:0}}{next_words}"
-            
-            text_parts.append(text_segment)
-            current_time = end_time
-        
-        # Final text filter with Karaoke effect
-        drawtext_filters = []
-        for i, text_part in enumerate(text_parts):
-            drawtext_filters.append(
-                f"drawtext=text='{text_part}':"
-                f"fontcolor=white:fontsize=32:"
-                f"box=0:boxcolor=black@0.0:"  # Remove background box
-                f"x=(w-text_w)/2:y=680:"  # Position text higher up
-                f"enable='between(t,{i*word_duration},{duration})'"
-            )
-        
-        # Alternative simpler approach - single line with proper positioning
-        filter_chain = [
-            f"[0:v]scale=768:768:force_original_aspect_ratio=increase[crop]",
-            f"[crop]drawbox=0:620:768:100:black@0.7:fill[bg]",
-            f"[bg]drawtext=text='{text}':fontcolor=white:fontsize=36:box=0:boxcolor=black@0.0:x=(w-text_w)/2:y=650[outv]"
-        ]
-        
-        filter_complex_str = ";".join(filter_chain)
+        # Using filter_complex for better control over the video stream (768x768 vertical video)
+        filter_complex_str = (
+            f"[0:v]scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1/1[bg];"
+            f"[bg]drawtext=text='{escaped_wrapped_text}':"
+            f"fontcolor=white:fontsize=30:"
+            f"fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf:" # Use a common font path if available, or remove if system default is fine
+            f"box=1:boxcolor=black@0.7:boxborderw=10:"
+            f"x=(w-text_w)/2:y=(h*0.8)-text_h/2[outv]" # Place text roughly at 80% of height
+        )
         
         cmd = [
             'ffmpeg',
@@ -249,53 +225,35 @@ def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: s
             '-pix_fmt', 'yuv420p',
             '-shortest',
             '-y',
-            '-loglevel', 'info',
+            '-loglevel', 'error',
             output_path
         ]
         
-        print(f"Running FFmpeg with Karaoke effect...")
-        
+        print(f"Running FFmpeg to create simple video...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
         
         if result.returncode == 0:
-            print("✓ Video with Karaoke subtitles created successfully")
+            print("✓ Simple video with subtitles created successfully")
             return True
         else:
-            print(f"❌ FFmpeg Karaoke failed: {result.stderr}")
-            # Fallback to simple subtitles
-            return create_video_with_simple_subtitles(image_path, audio_path, text, output_path, duration)
+            print(f"❌ FFmpeg video creation failed: {result.stderr}")
+            return False
         
     except Exception as e:
-        print(f"❌ FFmpeg Karaoke failed: {e}")
-        return create_video_with_simple_subtitles(image_path, audio_path, text, output_path, duration)
+        print(f"Simple subtitle video creation failed: {e}")
+        return False
 
-def create_video_with_simple_subtitles(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
-    """Fallback: Create video with simple centered subtitles"""
-    try:
-        # Escape special characters for FFmpeg
-        escaped_text = text.replace("'", "'\\\\\\''").replace(":", "\\\\:")
-        
-        cmd = [
-            'ffmpeg',
-            '-loop', '1',
-            '-i', image_path,
-            '-i', audio_path,
-            '-vf', f"drawtext=text='{escaped_text}':fontcolor=white:fontsize=36:fontfile=/System/Library/Fonts/Helvetica.ttc:box=1:boxcolor=black@0.7:boxborderw=10:x=(w-text_w)/2:y=h-th-100",
-            '-t', str(duration),
-            '-c:v', 'libx264',
-            '-c:a', 'aac',
-            '-pix_fmt', 'yuv420p',
-            '-shortest',
-            '-y',
-            output_path
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        return result.returncode == 0
-        
-    except Exception as e:
-        print(f"Simple subtitle fallback failed: {e}")
-        return create_video_without_subtitles(image_path, audio_path, output_path, duration)
+
+# The original create_video_with_subtitles_simple is replaced by the simpler version above
+# to fix the karaoke issue, but we keep the name for compatibility.
+def create_video_with_subtitles_simple(image_path: str, audio_path: str, text: str, output_path: str, duration: float):
+    # Wrap and escape the text first to fix the "text too big" issue
+    wrapped_text = wrap_text_for_ffmpeg(text, max_chars_per_line=30)
+    
+    # Call the simplified function (which was the old 'fallback' but is now the primary)
+    return create_video_with_simple_subtitles(image_path, audio_path, wrapped_text, output_path, duration)
+
+
 def generate_gradient_background(width=768, height=768, colors=None):
     """Generate a beautiful background"""
     if colors is None:
@@ -320,7 +278,8 @@ def generate_image_pollinations(text: str, img_path: str):
     try:
         print("Trying Pollinations.ai...")
         encoded = urllib.parse.quote(text)
-        img_url = f"https://pollinations.ai/p/{encoded}?width=768&height=768&nologo=true"
+        # Using 768x768 for square image suitable for short video aspect ratio
+        img_url = f"https://pollinations.ai/p/{encoded}?width=768&height=768&nologo=true" 
         
         response = requests.get(img_url, timeout=30)
         if response.status_code == 200:
@@ -385,30 +344,40 @@ def generate_silent_audio(duration: int, audio_path: str):
         print(f"Silent audio failed: {e}")
         return False
 
+# --- API ENDPOINTS ---
+
 @app.get("/")
 async def home():
+    # Assumes an index.html file exists in the same directory
     return FileResponse("index.html")
 
 @app.get("/facts")
 async def get_facts(category: str):
     if category not in PROMPTS:
-        return {"error": "Invalid category"}
+        raise HTTPException(status_code=400, detail="Invalid category")
+    
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="AI service unavailable (GROQ_API_KEY missing/invalid).")
 
     try:
         # Use Groq API to generate facts
         facts = generate_facts_with_groq(category)
         
         if not facts or len(facts) == 0:
-            return {"error": "Failed to generate facts with AI"}
+            raise HTTPException(status_code=500, detail="Failed to generate facts with AI")
         
         return {"facts": facts[:5]}
         
     except Exception as e:
         print(f"Facts generation error: {e}")
-        return {"error": f"Failed to fetch facts: {str(e)}"}
+        raise HTTPException(status_code=500, detail=f"Failed to fetch facts: {str(e)}")
 
 @app.get("/generate_video")
 async def generate_video(fact: str, category: str = "science"):
+    if not groq_client:
+        # Allow running with placeholder image/silent audio if key is missing
+        print("Warning: Groq client not initialized. Proceeding with silent audio and placeholder images.")
+    
     try:
         safe_fact = fact.strip()
         if len(safe_fact) > 300:
@@ -416,61 +385,64 @@ async def generate_video(fact: str, category: str = "science"):
 
         print(f"🎬 Generating video for: '{safe_fact}'")
 
-        # Generate image using multiple fallbacks
-        print("🖼️  Step 1: Generating image...")
+        # --- Step 1: Generate Image ---
+        print("🖼️ Step 1: Generating image...")
         img_path = f"/tmp/{uuid.uuid4()}.jpg"
-        image_generated = False
         
+        image_generated = False
         # Try multiple image sources
         if generate_image_pollinations(safe_fact, img_path):
             image_generated = True
-        elif generate_image_placeholder(safe_fact, img_path, category):
+        # Always fallback to placeholder
+        if not image_generated and generate_image_placeholder(safe_fact, img_path, category):
             image_generated = True
         
         if not image_generated:
             raise HTTPException(status_code=500, detail="All image generation methods failed")
 
-        # Generate audio with Groq TTS
-        print("🔊 Step 2: Generating VOICE-OVER audio with Groq...")
+        # --- Step 2: Generate Audio ---
+        print("🔊 Step 2: Generating VOICE-OVER audio...")
         audio_path = f"/tmp/{uuid.uuid4()}.mp3"
-        audio_generated = generate_audio_with_groq(safe_fact, audio_path)
+        audio_generated = False
+        duration = 5 # Default duration
         
-        print(f"🎯 Groq TTS result: {audio_generated}")
-
-        # Calculate duration
-        duration = 5  # Default duration
-        
-        if audio_generated:
-            try:
-                # Get duration from audio file using ffprobe
-                result = subprocess.run([
-                    'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                    '-of', 'default=noprint_wrappers=1:nokey=1', audio_path
-                ], capture_output=True, text=True, timeout=10)
-                
-                if result.returncode == 0:
-                    duration = min(float(result.stdout.strip()), 15)  # Max 15 seconds
-                else:
-                    duration = max(len(safe_fact.split()) / 2, 5)
+        if groq_client:
+            audio_generated = generate_audio_with_groq(safe_fact, audio_path)
+            
+            if audio_generated:
+                try:
+                    # Get duration from audio file using ffprobe
+                    result = subprocess.run([
+                        'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                        '-of', 'default=noprint_wrappers=1:nokey=1', audio_path
+                    ], capture_output=True, text=True, timeout=10)
                     
-                print(f"⏱️  Audio duration: {duration:.2f} seconds")
-            except Exception as e:
-                print(f"Error getting audio duration: {e}")
-                audio_generated = False
-                duration = max(len(safe_fact.split()) / 2, 5)
-        else:
-            duration = max(len(safe_fact.split()) / 2, 5)
-            print(f"⏱️  Estimated duration: {duration} seconds (NO VOICE-OVER)")
-            generate_silent_audio(duration, audio_path)
+                    if result.returncode == 0:
+                        duration = min(float(result.stdout.strip()), 15) # Max 15 seconds
+                    else:
+                        duration = max(len(safe_fact.split()) / 2, 5)
+                        
+                    print(f"⏱️ Audio duration: {duration:.2f} seconds")
+                except Exception as e:
+                    print(f"Error getting audio duration: {e}. Falling back to silent audio.")
+                    audio_generated = False # Force silent fallback if duration fails
+        
+        # Fallback to silent audio if TTS failed or was skipped
+        if not audio_generated:
+            duration = max(len(safe_fact.split()) / 2, 5) # Estimate duration
+            print(f"⏱️ Estimated duration: {duration:.2f} seconds (NO VOICE-OVER)")
+            generate_silent_audio(int(duration), audio_path)
 
-        # Create video with FFmpeg and burned-in subtitles
+
+        # --- Step 3: Create Video ---
         print("🎥 Step 3: Creating video with SUBTITLES...")
         output_path = f"/tmp/{uuid.uuid4()}.mp4"
         
+        # This call uses the corrected function which includes text wrapping and simpler drawtext
         video_created = create_video_with_subtitles_simple(
             img_path, 
             audio_path, 
-            safe_fact, 
+            safe_fact, # Pass original fact, wrapping happens inside the function
             output_path, 
             duration
         )
@@ -480,7 +452,9 @@ async def generate_video(fact: str, category: str = "science"):
 
         print("✅ Video with SUBTITLES created successfully!")
 
-        # Cleanup temporary files
+        # --- Step 4: Cleanup and Stream ---
+        
+        # Cleanup temporary files (image and audio)
         for temp_file in [img_path, audio_path]:
             if temp_file and os.path.exists(temp_file):
                 try:
@@ -502,8 +476,19 @@ async def generate_video(fact: str, category: str = "science"):
 
     except Exception as e:
         print(f"❌ Video generation failed: {e}")
-        return {"error": f"Video generation failed: {str(e)}"}
+        # Attempt to clean up any files that might have been created before the final video
+        for path in [img_path, audio_path, output_path]:
+            if 'path' in locals() and os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except:
+                    pass
+        raise HTTPException(status_code=500, detail=f"Video generation failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
+    # Make sure the /tmp directory exists or is writable
+    if not os.path.exists("/tmp"):
+        os.makedirs("/tmp")
+        
     uvicorn.run(app, host="0.0.0.0", port=8000)
