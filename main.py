@@ -9,6 +9,7 @@ import subprocess
 import random
 import json
 import re
+import tempfile
 from PIL import Image, ImageDraw
 
 # --- CONFIGURATION ---
@@ -86,8 +87,17 @@ def generate_audio_with_pyttsx3(text: str, audio_path: str):
         
         # Check if file was created
         if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-            # Estimate duration
-            duration = len(text.split()) * 0.5 + 1.0
+            # Get actual duration using ffprobe
+            try:
+                result = subprocess.run([
+                    "ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path
+                ], capture_output=True, text=True, timeout=10)
+                duration = float(result.stdout.strip())
+            except:
+                # Estimate duration if ffprobe fails
+                duration = len(text.split()) * 0.5 + 1.0
             return True, duration
         else:
             return False, 0.0
@@ -109,8 +119,17 @@ def generate_audio_with_gtts(text: str, audio_path: str):
         
         # Check if file was created
         if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-            # Estimate duration
-            duration = len(text.split()) * 0.5 + 1.0
+            # Get actual duration using ffprobe
+            try:
+                result = subprocess.run([
+                    "ffprobe", "-v", "error", "-show_entries",
+                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
+                    audio_path
+                ], capture_output=True, text=True, timeout=10)
+                duration = float(result.stdout.strip())
+            except:
+                # Estimate duration if ffprobe fails
+                duration = len(text.split()) * 0.5 + 1.0
             return True, duration
         else:
             return False, 0.0
@@ -166,28 +185,84 @@ def generate_audio(text: str, audio_path: str, category: str = "science"):
     print("Using enhanced fallback audio...")
     return generate_audio_fallback(text, audio_path)
 
-# --- VIDEO GENERATION FUNCTIONS ---
+# --- IMPROVED WORD TIMING FUNCTIONS ---
 
-def generate_word_timings(text: str, duration: float):
-    """Generate word timings for karaoke effect"""
+def analyze_speech_pattern(text: str, duration: float):
+    """Analyze text to create more realistic word timings based on linguistic patterns"""
     words = text.split()
     if not words:
         return []
     
-    # Simple equal distribution
-    time_per_word = duration / len(words)
+    # Linguistic patterns for better timing
+    word_complexity = {
+        'short': 0.3,    # and, the, is
+        'medium': 0.5,   # most common words
+        'long': 0.8,     # multi-syllable words
+        'complex': 1.2   # technical/long words
+    }
+    
+    # Common short words that are spoken quickly
+    short_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+    
+    # Calculate base time per word
+    base_time_per_word = duration / len(words)
+    
     timings = []
+    current_time = 0.1  # Start slightly after beginning
     
     for i, word in enumerate(words):
-        start_time = i * time_per_word
-        end_time = (i + 1) * time_per_word
+        # Determine word complexity
+        word_lower = word.lower().strip('.,!?;:"')
+        if word_lower in short_words:
+            complexity = word_complexity['short']
+        elif len(word_lower) <= 3:
+            complexity = word_complexity['short']
+        elif len(word_lower) <= 5:
+            complexity = word_complexity['medium']
+        elif len(word_lower) <= 8:
+            complexity = word_complexity['long']
+        else:
+            complexity = word_complexity['complex']
+        
+        # Add pause for punctuation
+        pause_multiplier = 1.0
+        if i > 0 and any(punc in words[i-1] for punc in ',;'):
+            pause_multiplier = 1.3
+        elif i > 0 and any(punc in words[i-1] for punc in '.!?'):
+            pause_multiplier = 1.6
+        
+        # Calculate word duration
+        word_duration = base_time_per_word * complexity * pause_multiplier
+        
+        # Ensure we don't exceed total duration
+        if current_time + word_duration > duration - 0.1:
+            word_duration = duration - current_time - 0.1
+        
+        start_time = current_time
+        end_time = current_time + word_duration
+        
         timings.append({
             "word": word,
             "start": start_time,
             "end": end_time
         })
+        
+        current_time = end_time
+        
+        # Add small pause between words
+        if i < len(words) - 1:
+            current_time += 0.05  # 50ms pause between words
     
     return timings
+
+def generate_word_timings(text: str, duration: float):
+    """Generate improved word timings for better karaoke sync"""
+    words = text.split()
+    if not words:
+        return []
+    
+    # Use linguistic analysis for better timing
+    return analyze_speech_pattern(text, duration)
 
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
@@ -211,21 +286,35 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
     if effect == "karaoke":
-        # Karaoke effect: word-by-word yellow highlight
+        # IMPROVED Karaoke effect: word-by-word yellow highlight with proper timing
+        full_text = " ".join([w["word"] for w in word_timings])
+        
+        # First, show the full text in white (base layer)
+        start = format_time_ass(word_timings[0]["start"])
+        end = format_time_ass(word_timings[-1]["end"])
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
+        
+        # Then, create karaoke highlights with precise timing
         for timing in word_timings:
             start = format_time_ass(timing["start"])
             end = format_time_ass(timing["end"])
             
-            # Build text with highlighted word
-            highlighted_text = ""
+            # Build the text up to and including the current word
+            current_words = []
             for t in word_timings:
-                if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                    # Current word - yellow highlight
-                    highlighted_text += "{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0} "
+                if t["end"] <= timing["end"]:
+                    if t["word"] == timing["word"] and t["start"] == timing["start"]:
+                        # Current word - yellow highlight
+                        current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
+                    else:
+                        # Already spoken words - white
+                        current_words.append(t["word"])
                 else:
-                    highlighted_text += t["word"] + " "
+                    # Future words - don't show yet
+                    break
             
-            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text.strip()}\n"
+            highlighted_text = " ".join(current_words)
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
     
     elif effect == "fade":
         # Fade in effect
@@ -235,7 +324,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
-        # Typewriter: reveal text progressively
+        # Typewriter: reveal text progressively with word timing
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             end = format_time_ass(word_timings[-1]["end"])
@@ -408,7 +497,8 @@ def home():
         },
         "status": "operational",
         "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
-        "tts_engine": "pyttsx3 + gTTS"
+        "tts_engine": "pyttsx3 + gTTS",
+        "karaoke_sync": "improved"
     }
 
 @app.get("/test")
@@ -462,12 +552,16 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
             raise HTTPException(500, "Audio generation failed")
         
         duration = max(duration, 3.0)  # Minimum 3 seconds
-        print(f"Audio duration: {duration}s")
+        print(f"Audio duration: {duration:.2f}s")
         
-        # Step 3: Generate word timings for karaoke
-        print("Step 3: Creating word timings...")
+        # Step 3: Generate IMPROVED word timings for karaoke
+        print("Step 3: Creating improved word timings...")
         word_timings = generate_word_timings(safe_fact, duration)
-        print(f"Generated {len(word_timings)} word timings")
+        print(f"Generated {len(word_timings)} word timings with improved sync")
+        
+        # Debug: print timing information
+        total_word_time = sum([t['end'] - t['start'] for t in word_timings])
+        print(f"Total word time: {total_word_time:.2f}s, Audio duration: {duration:.2f}s")
         
         # Step 4: Create subtitle file with selected effect - CENTERED
         print(f"Step 4: Creating {effect} subtitles (centered)...")
@@ -532,7 +626,8 @@ def health_check():
         "ffmpeg_available": True,
         "environment": "production",
         "cors_enabled": True,
-        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen"
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
+        "karaoke_sync": "improved"
     }
 
 # --- Run server ---
