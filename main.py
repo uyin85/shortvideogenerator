@@ -264,6 +264,8 @@ def generate_word_timings(text: str, duration: float):
     # Use linguistic analysis for better timing
     return analyze_speech_pattern(text, duration)
 
+
+
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
     
@@ -286,15 +288,9 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
     if effect == "karaoke":
-        # IMPROVED Karaoke effect: word-by-word yellow highlight with proper timing
-        full_text = " ".join([w["word"] for w in word_timings])
+        # ✅ FIXED: Removed the static base layer that caused double-text ghosting
+        # Now only render the progressively highlighted line
         
-        # First, show the full text in white (base layer)
-        start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"])
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
-        
-        # Then, create karaoke highlights with precise timing
         for timing in word_timings:
             start = format_time_ass(timing["start"])
             end = format_time_ass(timing["end"])
@@ -304,7 +300,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             for t in word_timings:
                 if t["end"] <= timing["end"]:
                     if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                        # Current word - yellow highlight
+                        # Current word - yellow highlight + bold
                         current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                     else:
                         # Already spoken words - white
@@ -348,6 +344,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
+
+
 
 def format_time_ass(seconds):
     """Convert seconds to ASS timestamp format (0:00:00.00)"""
