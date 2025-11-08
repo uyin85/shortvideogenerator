@@ -19,7 +19,7 @@ app = FastAPI(
 )
 
 # CORS configuration - update with your frontend URL
-FRONTEND_URL = os.getenv("https://multisite.interactivelink.site/factshortvideogen", "http://localhost:3000")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 app.add_middleware(
     CORSMiddleware,
