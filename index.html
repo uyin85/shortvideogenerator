@@ -966,4 +966,11 @@
       
       // Add hover effect instructions
       factsList.addEventListener('mouseover', function(e) {
-        if (e.target.classList
+        if (e.target.classList.contains('fact') && !e.target.classList.contains('selected')) {
+          e.target.style.cursor = 'pointer';
+        }
+      });
+    });
+  </script>
+</body>
+</html>
