@@ -237,154 +237,302 @@
       color: #4a5568;
     }
 
-    /* Progress Bar Styles */
-    .progress-container {
-      width: 100%;
-      background: #e2e8f0;
-      border-radius: 10px;
-      margin: 20px 0;
-      overflow: hidden;
+    /* ENHANCED PROGRESS BAR STYLES */
+    .progress-wrapper {
       display: none;
-    }
-
-    .progress-bar {
-      width: 0%;
-      height: 8px;
-      background: linear-gradient(90deg, #667eea, #764ba2);
-      border-radius: 10px;
-      transition: width 0.3s ease;
+      margin: 30px 0;
+      padding: 25px;
+      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
       position: relative;
       overflow: hidden;
     }
 
-    .progress-bar::after {
+    .progress-wrapper::before {
       content: '';
       position: absolute;
       top: 0;
-      left: -100%;
-      width: 100%;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #667eea, #764ba2, #667eea);
+      background-size: 200% 100%;
+      animation: gradientShift 3s ease infinite;
+    }
+
+    @keyframes gradientShift {
+      0%, 100% { background-position: 0% 0%; }
+      50% { background-position: 100% 0%; }
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .progress-title {
+      font-size: 1.1em;
+      font-weight: 600;
+      color: #2d3748;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .progress-percentage {
+      font-size: 1.5em;
+      font-weight: 700;
+      color: #667eea;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .progress-bar-container {
+      position: relative;
+      height: 16px;
+      background: rgba(255,255,255,0.3);
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .progress-bar-fill {
       height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-      animation: shimmer 2s infinite;
+      width: 0%;
+      background: linear-gradient(90deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+      background-size: 200% 100%;
+      border-radius: 20px;
+      transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      box-shadow: 0 2px 10px rgba(102, 126, 234, 0.5);
+      animation: gradientFlow 2s ease infinite;
+    }
+
+    @keyframes gradientFlow {
+      0%, 100% { background-position: 0% 0%; }
+      50% { background-position: 100% 0%; }
+    }
+
+    .progress-bar-fill::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+      animation: shimmer 1.5s infinite;
     }
 
     @keyframes shimmer {
-      0% { left: -100%; }
-      100% { left: 100%; }
+      0% { transform: translateX(-100%); }
+      100% { transform: translateX(100%); }
     }
 
-    .progress-steps {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 10px;
-      font-size: 12px;
-      color: #718096;
-    }
-
-    .progress-step.active {
-      color: #667eea;
-      font-weight: 600;
-    }
-
-    .progress-step.completed::before {
-      content: '✓';
-      color: #48bb78;
-      font-weight: bold;
-      margin-right: 5px;
+    .progress-bar-fill::after {
+      content: '';
+      position: absolute;
+      right: 0;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 12px;
+      height: 12px;
+      background: white;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(255,255,255,0.8), 0 0 20px rgba(102, 126, 234, 0.6);
+      animation: pulse 1s infinite;
     }
 
     .progress-info {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-top: 10px;
-      font-size: 14px;
-    }
-
-    .progress-percentage {
-      font-weight: 600;
-      color: #667eea;
+      margin-top: 15px;
     }
 
     .progress-time {
-      color: #718096;
-      font-size: 12px;
-    }
-
-    /* Generation Steps */
-    .generation-steps {
-      background: #f8f9fa;
-      border-radius: 12px;
-      padding: 20px;
-      margin: 20px 0;
-      display: none;
-    }
-
-    .generation-step {
       display: flex;
       align-items: center;
-      margin-bottom: 15px;
-      padding: 10px;
-      border-radius: 8px;
-      transition: all 0.3s ease;
+      gap: 8px;
+      color: #4a5568;
+      font-size: 14px;
+      font-weight: 500;
     }
 
-    .generation-step:last-child {
-      margin-bottom: 0;
+    .time-icon {
+      width: 18px;
+      height: 18px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%234a5568' viewBox='0 0 24 24'%3E%3Cpath d='M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z'/%3E%3C/svg%3E");
+      background-size: contain;
     }
 
-    .generation-step.active {
-      background: #ebf8ff;
-      border-left: 4px solid #4299e1;
+    .progress-steps-container {
+      margin-top: 25px;
+      padding-top: 20px;
+      border-top: 1px solid rgba(255,255,255,0.3);
     }
 
-    .generation-step.completed {
-      background: #f0fff4;
-      border-left: 4px solid #48bb78;
+    .progress-steps {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 15px;
     }
 
-    .step-icon {
-      width: 24px;
-      height: 24px;
+    .progress-step {
+      text-align: center;
+      position: relative;
+    }
+
+    .step-circle {
+      width: 50px;
+      height: 50px;
+      margin: 0 auto 10px;
       border-radius: 50%;
+      background: rgba(255,255,255,0.3);
       display: flex;
       align-items: center;
       justify-content: center;
-      margin-right: 12px;
-      font-size: 12px;
+      font-size: 20px;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    }
+
+    .step-circle::before {
+      content: '';
+      position: absolute;
+      inset: -3px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      z-index: -1;
+    }
+
+    .progress-step.active .step-circle {
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      transform: scale(1.15);
+      box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+      animation: pulse 2s infinite;
+    }
+
+    .progress-step.active .step-circle::before {
+      opacity: 1;
+      animation: rotate 3s linear infinite;
+    }
+
+    @keyframes rotate {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .progress-step.completed .step-circle {
+      background: linear-gradient(135deg, #48bb78, #38a169);
+      color: white;
+      transform: scale(1.1);
+      box-shadow: 0 4px 15px rgba(72, 187, 120, 0.4);
+    }
+
+    .progress-step.completed .step-circle::after {
+      content: '✓';
+      position: absolute;
+      font-size: 24px;
       font-weight: bold;
+      animation: checkPop 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     }
 
-    .step-icon.pending {
-      background: #e2e8f0;
-      color: #718096;
+    @keyframes checkPop {
+      0% { transform: scale(0); }
+      50% { transform: scale(1.2); }
+      100% { transform: scale(1); }
     }
 
-    .step-icon.active {
-      background: #4299e1;
-      color: white;
-    }
-
-    .step-icon.completed {
-      background: #48bb78;
-      color: white;
-    }
-
-    .step-text {
-      flex: 1;
-    }
-
-    .step-title {
+    .step-label {
+      font-size: 13px;
       font-weight: 600;
-      margin-bottom: 2px;
+      color: #4a5568;
+      transition: color 0.3s ease;
     }
 
-    .step-description {
-      font-size: 12px;
-      color: #718096;
+    .progress-step.active .step-label {
+      color: #667eea;
     }
 
-    /* Effect Preview */
+    .progress-step.completed .step-label {
+      color: #38a169;
+    }
+
+    .step-connector {
+      position: absolute;
+      top: 25px;
+      left: 50%;
+      width: 100%;
+      height: 3px;
+      background: rgba(255,255,255,0.3);
+      z-index: -1;
+    }
+
+    .progress-step:last-child .step-connector {
+      display: none;
+    }
+
+    .step-connector::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #48bb78, #38a169);
+      transition: width 0.6s ease;
+    }
+
+    .progress-step.completed .step-connector::before {
+      width: 100%;
+    }
+
+    /* Floating particles animation */
+    .progress-wrapper .particles {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      overflow: hidden;
+      border-radius: 20px;
+    }
+
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: rgba(102, 126, 234, 0.3);
+      border-radius: 50%;
+      animation: float 4s infinite ease-in-out;
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0) translateX(0);
+        opacity: 0;
+      }
+      10% {
+        opacity: 1;
+      }
+      90% {
+        opacity: 1;
+      }
+      100% {
+        transform: translateY(-100px) translateX(20px);
+        opacity: 0;
+      }
+    }
+
     .effect-preview {
       background: #f8f9fa;
       border-radius: 12px;
@@ -424,11 +572,15 @@
       }
 
       .progress-steps {
-        font-size: 10px;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 20px;
+      }
+
+      .progress-percentage {
+        font-size: 1.2em;
       }
     }
 
-    /* Icon styles */
     .icon {
       display: inline-block;
       width: 24px;
@@ -439,8 +591,6 @@
 
     .icon-brain { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M12 2a10 10 0 1010 10A10 10 0 0012 2zm0 18a8 8 0 118-8 8 8 0 01-8 8z'/%3E%3Cpath d='M12 6a6 6 0 106 6 6 6 0 00-6-6zm0 10a4 4 0 114-4 4 4 0 01-4 4z'/%3E%3C/svg%3E"); }
     .icon-video { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M17 10.5V7a1 1 0 00-1-1H4a1 1 0 00-1 1v10a1 1 0 001 1h12a1 1 0 001-1v-3.5l4 4v-11l-4 4z'/%3E%3C/svg%3E"); }
-    .icon-audio { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M12 3v9.28a4.39 4.39 0 00-1.5-.28C8.01 12 6 14.01 6 16.5S8.01 21 10.5 21c2.31 0 4.2-1.75 4.45-4H15V6h4V3h-7z'/%3E%3C/svg%3E"); }
-    .icon-image { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-4.86 8.86l-3 3.87L9 13.14 6 17h12l-3.86-5.14z'/%3E%3C/svg%3E"); }
     .icon-magic { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23667eea'%3E%3Cpath d='M7.5 5.6L5 7l1.4-2.5L5 2l2.5 1.4L10 2 8.6 4.5 10 7 7.5 5.6zm12 9.8L17 14l1.4-2.5L17 9l2.5 1.4L22 9l-1.4 2.5L22 14l-2.5-1.6zM22 2l-2.5 1.4L17 2l1.4 2.5L17 7l2.5-1.4L22 7l-1.4-2.5L22 2zM9.5 14.5l-3 1.6 1.6-3-1.6-3 3 1.6 3-1.6-1.6 3 1.6 3-3-1.6z'/%3E%3C/svg%3E"); }
   </style>
 </head>
@@ -455,16 +605,16 @@
         <div>AI-Generated Facts</div>
       </div>
       <div class="feature">
-        <div class="icon icon-image"></div>
-        <div>AI-Generated Images</div>
-      </div>
-      <div class="feature">
-        <div class="icon icon-audio"></div>
-        <div>Text-to-Speech Voice</div>
+        <div class="icon icon-video"></div>
+        <div>ElevenLabs Voice</div>
       </div>
       <div class="feature">
         <div class="icon icon-magic"></div>
-        <div>Animated Subtitles</div>
+        <div>Karaoke Subtitles</div>
+      </div>
+      <div class="feature">
+        <div class="icon icon-video"></div>
+        <div>HD Video Export</div>
       </div>
     </div>
 
@@ -506,49 +656,51 @@
     
     <div id="status"></div>
 
-    <!-- Progress Bar Section -->
-    <div class="progress-container" id="progress-container">
-      <div class="progress-bar" id="progress-bar"></div>
-      <div class="progress-info">
-        <span class="progress-percentage" id="progress-percentage">0%</span>
-        <span class="progress-time" id="progress-time">Estimating time...</span>
+    <!-- ENHANCED PROGRESS BAR -->
+    <div class="progress-wrapper" id="progress-wrapper">
+      <div class="particles" id="particles"></div>
+      
+      <div class="progress-header">
+        <div class="progress-title">
+          <span>🎬</span>
+          <span id="progress-status">Generating Video</span>
+        </div>
+        <div class="progress-percentage" id="progress-percentage">0%</div>
       </div>
-      <div class="progress-steps">
-        <div class="progress-step" id="step-image">Image</div>
-        <div class="progress-step" id="step-audio">Audio</div>
-        <div class="progress-step" id="step-subtitles">Subtitles</div>
-        <div class="progress-step" id="step-export">Export</div>
-      </div>
-    </div>
 
-    <!-- Generation Steps -->
-    <div class="generation-steps" id="generation-steps">
-      <div class="generation-step" id="step-1">
-        <div class="step-icon pending">1</div>
-        <div class="step-text">
-          <div class="step-title">Generating AI Image</div>
-          <div class="step-description">Creating visual content with AI</div>
+      <div class="progress-bar-container">
+        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+      </div>
+
+      <div class="progress-info">
+        <div class="progress-time">
+          <div class="time-icon"></div>
+          <span id="progress-time">Estimating time...</span>
         </div>
       </div>
-      <div class="generation-step" id="step-2">
-        <div class="step-icon pending">2</div>
-        <div class="step-text">
-          <div class="step-title">Generating Voice Audio</div>
-          <div class="step-description">Converting text to speech with Groq</div>
-        </div>
-      </div>
-      <div class="generation-step" id="step-3">
-        <div class="step-icon pending">3</div>
-        <div class="step-text">
-          <div class="step-title">Creating Animated Subtitles</div>
-          <div class="step-description" id="subtitle-effect-desc">Applying karaoke effect</div>
-        </div>
-      </div>
-      <div class="generation-step" id="step-4">
-        <div class="step-icon pending">4</div>
-        <div class="step-text">
-          <div class="step-title">Exporting Video</div>
-          <div class="step-description">Finalizing video with FFmpeg</div>
+
+      <div class="progress-steps-container">
+        <div class="progress-steps">
+          <div class="progress-step" id="step-image">
+            <div class="step-connector"></div>
+            <div class="step-circle">🖼️</div>
+            <div class="step-label">AI Image</div>
+          </div>
+          <div class="progress-step" id="step-audio">
+            <div class="step-connector"></div>
+            <div class="step-circle">🎤</div>
+            <div class="step-label">Voice</div>
+          </div>
+          <div class="progress-step" id="step-subtitles">
+            <div class="step-connector"></div>
+            <div class="step-circle">💬</div>
+            <div class="step-label">Subtitles</div>
+          </div>
+          <div class="progress-step" id="step-export">
+            <div class="step-connector"></div>
+            <div class="step-circle">📹</div>
+            <div class="step-label">Export</div>
+          </div>
         </div>
       </div>
     </div>
@@ -572,7 +724,6 @@
     let progressInterval = null;
     let startTime = null;
 
-    // Effect descriptions
     const effectDescriptions = {
       karaoke: "Words highlight one by one in yellow as they're spoken, perfect for voice synchronization",
       fade: "Text smoothly fades in over 2 seconds for a professional appearance",
@@ -589,7 +740,6 @@
       static: "Static Text"
     };
 
-    // Effect selection handler
     document.getElementById('effect').addEventListener('change', function() {
       currentEffect = this.value;
       updateEffectPreview();
@@ -598,13 +748,23 @@
     function updateEffectPreview() {
       document.getElementById('effect-preview-title').textContent = effectTitles[currentEffect];
       document.getElementById('effect-preview-desc').textContent = effectDescriptions[currentEffect];
-      document.getElementById('subtitle-effect-desc').textContent = `Applying ${currentEffect} effect`;
     }
 
-    // Initialize effect preview
     updateEffectPreview();
 
-    // Category selection handler
+    // Create floating particles
+    function createParticles() {
+      const container = document.getElementById('particles');
+      for (let i = 0; i < 15; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+        particle.style.left = Math.random() * 100 + '%';
+        particle.style.animationDelay = Math.random() * 4 + 's';
+        particle.style.animationDuration = (Math.random() * 3 + 3) + 's';
+        container.appendChild(particle);
+      }
+    }
+
     document.getElementById('category').addEventListener('change', async function() {
       const cat = this.value;
       if (!cat) return;
@@ -615,18 +775,14 @@
       const status = document.getElementById('status');
       const factsList = document.getElementById('facts-list');
       const downloadLink = document.getElementById('download-link');
-      const progressContainer = document.getElementById('progress-container');
-      const generationSteps = document.getElementById('generation-steps');
+      const progressWrapper = document.getElementById('progress-wrapper');
 
-      // Reset UI
       status.textContent = '';
       status.className = '';
       factsList.innerHTML = '';
       downloadLink.style.display = 'none';
-      progressContainer.style.display = 'none';
-      generationSteps.style.display = 'none';
+      progressWrapper.style.display = 'none';
 
-      // Show loading
       status.textContent = '🧠 AI is generating 5 interesting facts...';
       status.className = 'status-loading';
 
@@ -643,7 +799,6 @@
         status.textContent = '✅ Facts generated! Choose one to create a video:';
         status.className = 'status-success';
 
-        // Display facts
         factsList.innerHTML = '<div class="facts-title">📝 Choose a Fact for Your Video:</div>';
         
         data.facts.forEach((fact, index) => {
@@ -655,16 +810,13 @@
           `;
           
           factDiv.onclick = () => {
-            // Remove selected class from all facts
             document.querySelectorAll('.fact').forEach(el => {
               el.classList.remove('selected');
             });
             
-            // Add selected class to clicked fact
             factDiv.classList.add('selected');
             selectedFact = fact;
             
-            // Show video generation hint
             const status = document.getElementById('status');
             status.textContent = `✅ Fact selected! Video will include ${currentEffect} subtitles.`;
             status.className = 'status-success';
@@ -677,215 +829,3 @@
         status.textContent = `❌ Failed to load facts: ${error.message}`;
         status.className = 'status-error';
       }
-    });
-
-    // Video generation handler
-    document.addEventListener('click', async (e) => {
-      if (e.target.classList.contains('fact') && selectedFact) {
-        const status = document.getElementById('status');
-        const downloadLink = document.getElementById('download-link');
-        const progressContainer = document.getElementById('progress-container');
-        const progressBar = document.getElementById('progress-bar');
-        const progressPercentage = document.getElementById('progress-percentage');
-        const progressTime = document.getElementById('progress-time');
-        const generationSteps = document.getElementById('generation-steps');
-        
-        // Reset UI
-        downloadLink.style.display = 'none';
-        downloadLink.classList.remove('pulse');
-        progressBar.style.width = '0%';
-        progressPercentage.textContent = '0%';
-        progressTime.textContent = 'Estimating time...';
-        
-        // Show progress elements
-        progressContainer.style.display = 'block';
-        generationSteps.style.display = 'block';
-        
-        // Reset all steps
-        resetProgressSteps();
-
-        try {
-          const url = `/generate_video?fact=${encodeURIComponent(selectedFact)}&category=${currentCategory}&effect=${currentEffect}`;
-          
-          // Start progress animation
-          startProgressAnimation();
-          
-          // Start time tracking
-          startTime = Date.now();
-          updateTimeEstimate();
-          
-          const response = await fetch(url);
-          
-          if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || `Server error: ${response.status}`);
-          }
-
-          // Get the video blob
-          const blob = await response.blob();
-          
-          if (blob.size === 0) {
-            throw new Error("Empty video file generated");
-          }
-
-          // Stop progress animation and show completion
-          completeProgressAnimation();
-          
-          // Create download link
-          const videoUrl = URL.createObjectURL(blob);
-          downloadLink.href = videoUrl;
-          downloadLink.style.display = 'block';
-          downloadLink.textContent = `🎬 Download Video with ${effectTitles[currentEffect]}`;
-          downloadLink.classList.add('pulse');
-          
-          status.innerHTML = `✅ Video with ${effectTitles[currentEffect]} generated successfully!`;
-          status.className = 'status-success';
-
-          // Clean up URL when page unloads
-          window.addEventListener('beforeunload', () => {
-            URL.revokeObjectURL(videoUrl);
-          });
-
-        } catch (error) {
-          console.error('Video generation error:', error);
-          status.textContent = `❌ Failed to generate video: ${error.message}`;
-          status.className = 'status-error';
-          
-          // Stop progress animation
-          stopProgressAnimation();
-          
-          // Remove pulse animation if it was added
-          downloadLink.classList.remove('pulse');
-        }
-      }
-    });
-
-    // Progress animation functions
-    function startProgressAnimation() {
-      const progressBar = document.getElementById('progress-bar');
-      const progressPercentage = document.getElementById('progress-percentage');
-      const status = document.getElementById('status');
-      
-      status.innerHTML = `<div class="loading-spinner"></div> Generating your video with ${effectTitles[currentEffect]}...`;
-      status.className = 'status-loading';
-      
-      let progress = 0;
-      const targetProgress = 90; // Stop at 90% until completion
-      
-      progressInterval = setInterval(() => {
-        progress += Math.random() * 5; // Random increment for natural feel
-        if (progress >= targetProgress) {
-          progress = targetProgress;
-        }
-        
-        progressBar.style.width = progress + '%';
-        progressPercentage.textContent = Math.round(progress) + '%';
-        
-        // Update steps based on progress
-        updateProgressSteps(progress);
-        
-        if (progress >= targetProgress) {
-          clearInterval(progressInterval);
-        }
-      }, 500);
-    }
-
-    function completeProgressAnimation() {
-      const progressBar = document.getElementById('progress-bar');
-      const progressPercentage = document.getElementById('progress-percentage');
-      
-      // Complete the progress bar
-      progressBar.style.width = '100%';
-      progressPercentage.textContent = '100%';
-      
-      // Mark all steps as completed
-      completeAllSteps();
-      
-      // Stop any running interval
-      if (progressInterval) {
-        clearInterval(progressInterval);
-      }
-    }
-
-    function stopProgressAnimation() {
-      if (progressInterval) {
-        clearInterval(progressInterval);
-      }
-    }
-
-    function updateProgressSteps(progress) {
-      const steps = [
-        { element: 'step-1', threshold: 25 },
-        { element: 'step-2', threshold: 50 },
-        { element: 'step-3', threshold: 75 },
-        { element: 'step-4', threshold: 90 }
-      ];
-      
-      steps.forEach(step => {
-        const stepElement = document.getElementById(step.element);
-        if (progress >= step.threshold) {
-          stepElement.classList.remove('active');
-          stepElement.classList.add('completed');
-          stepElement.querySelector('.step-icon').classList.remove('pending', 'active');
-          stepElement.querySelector('.step-icon').classList.add('completed');
-          stepElement.querySelector('.step-icon').textContent = '✓';
-        } else if (progress >= step.threshold - 10) {
-          stepElement.classList.add('active');
-          stepElement.classList.remove('completed');
-          stepElement.querySelector('.step-icon').classList.remove('pending', 'completed');
-          stepElement.querySelector('.step-icon').classList.add('active');
-        }
-      });
-    }
-
-    function completeAllSteps() {
-      for (let i = 1; i <= 4; i++) {
-        const stepElement = document.getElementById(`step-${i}`);
-        stepElement.classList.remove('active');
-        stepElement.classList.add('completed');
-        stepElement.querySelector('.step-icon').classList.remove('pending', 'active');
-        stepElement.querySelector('.step-icon').classList.add('completed');
-        stepElement.querySelector('.step-icon').textContent = '✓';
-      }
-    }
-
-    function resetProgressSteps() {
-      for (let i = 1; i <= 4; i++) {
-        const stepElement = document.getElementById(`step-${i}`);
-        stepElement.classList.remove('active', 'completed');
-        stepElement.querySelector('.step-icon').classList.remove('active', 'completed');
-        stepElement.querySelector('.step-icon').classList.add('pending');
-        stepElement.querySelector('.step-icon').textContent = i;
-      }
-    }
-
-    function updateTimeEstimate() {
-      const progressTime = document.getElementById('progress-time');
-      const interval = setInterval(() => {
-        if (!startTime) {
-          clearInterval(interval);
-          return;
-        }
-        
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const minutes = Math.floor(elapsed / 60);
-        const seconds = elapsed % 60;
-        
-        progressTime.textContent = `Elapsed: ${minutes}m ${seconds}s`;
-      }, 1000);
-    }
-
-    // Add some interactive effects
-    document.addEventListener('DOMContentLoaded', function() {
-      const factsList = document.getElementById('facts-list');
-      
-      // Add hover effect instructions
-      factsList.addEventListener('mouseover', function(e) {
-        if (e.target.classList.contains('fact') && !e.target.classList.contains('selected')) {
-          e.target.style.cursor = 'pointer';
-        }
-      });
-    });
-  </script>
-</body>
-</html>
