@@ -11,8 +11,6 @@ import random
 import json
 import re
 from PIL import Image, ImageDraw
-from elevenlabs.client import ElevenLabs
-from elevenlabs import save
 
 # --- CONFIGURATION ---
 app = FastAPI(title="AI Fact Short Video Generator")
@@ -37,13 +35,9 @@ if os.getenv("GROQ_API_KEY"):
     except Exception as e:
         print(f"Groq init warning: {e}")
 
-# ElevenLabs for TTS
-elevenlabs_client = None
-if os.getenv("ELEVENLABS_API_KEY"):
-    try:
-        elevenlabs_client = ElevenLabs(api_key=os.environ["ELEVENLABS_API_KEY"])
-    except Exception as e:
-        print(f"ElevenLabs init warning: {e}")
+# ElevenLabs for TTS (using requests - simpler and more reliable)
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 
 PROMPTS = {
     "science": "Give me 5 short surprising science facts. One sentence each, under 15 words.",
@@ -61,13 +55,13 @@ CATEGORY_COLORS = {
     "sports": ["#FF6B6B", "#4ECDC4"]
 }
 
-# ElevenLabs voices (free tier)
-VOICES = {
-    "science": "Rachel",      # Clear, professional female
-    "successful_person": "Adam",  # Confident male
-    "unsolved_mystery": "Domi",   # Mysterious female
-    "history": "Antoni",      # Deep narrative male
-    "sports": "Josh"          # Energetic male
+# ElevenLabs voice IDs (free tier)
+VOICE_IDS = {
+    "science": "21m00Tcm4TlvDq8ikWAM",      # Rachel - Clear, professional female
+    "successful_person": "pNInz6obpgDQGcFmaJgB",  # Adam - Confident male
+    "unsolved_mystery": "AZnzlk1XvdvUeBnXmlld",   # Domi - Mysterious female
+    "history": "ErXwobaYiN019PkySvjV",      # Antoni - Deep narrative male
+    "sports": "TxGEqnHWrfWFTfGW9XjX"          # Josh - Energetic male
 }
 
 # --- HELPER FUNCTIONS ---
@@ -112,26 +106,44 @@ def generate_facts_fallback(category: str):
 
 
 def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "science"):
-    """Generate audio using ElevenLabs TTS API"""
-    if not elevenlabs_client:
-        print("ElevenLabs client not initialized, using fallback")
+    """Generate audio using ElevenLabs TTS API via REST"""
+    if not ELEVENLABS_API_KEY:
+        print("ElevenLabs API key not set, using fallback")
         return generate_audio_fallback(text, audio_path)
     
     try:
         # Select voice based on category
-        voice_name = VOICES.get(category, "Rachel")
+        voice_id = VOICE_IDS.get(category, VOICE_IDS["science"])
         
-        # Generate audio with ElevenLabs
-        print(f"Generating audio with voice: {voice_name}")
-        audio = elevenlabs_client.generate(
-            text=text,
-            voice=voice_name,
-            model="eleven_monolingual_v1"  # Free tier model
-        )
+        print(f"Generating audio with ElevenLabs voice ID: {voice_id}")
         
-        # Save audio to temporary MP3 file
+        # Make API request
+        url = f"{ELEVENLABS_API_URL}/{voice_id}"
+        headers = {
+            "Accept": "audio/mpeg",
+            "Content-Type": "application/json",
+            "xi-api-key": ELEVENLABS_API_KEY
+        }
+        
+        data = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75
+            }
+        }
+        
+        response = requests.post(url, json=data, headers=headers, timeout=30)
+        
+        if response.status_code != 200:
+            print(f"ElevenLabs API error: {response.status_code} - {response.text}")
+            return generate_audio_fallback(text, audio_path)
+        
+        # Save audio
         temp_mp3 = audio_path.replace(".mp3", "_temp.mp3")
-        save(audio, temp_mp3)
+        with open(temp_mp3, 'wb') as f:
+            f.write(response.content)
         
         # Get audio duration using ffprobe
         try:
@@ -149,7 +161,7 @@ def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "
         subprocess.run([
             "ffmpeg", "-i", temp_mp3,
             "-acodec", "libmp3lame", "-b:a", "128k",
-            "-ar", "22050",  # Standard sample rate
+            "-ar", "22050",
             audio_path, "-y", "-loglevel", "error"
         ], timeout=30)
         
@@ -489,7 +501,7 @@ def health_check():
     return {
         "status": "healthy",
         "groq_available": groq_client is not None,
-        "elevenlabs_available": elevenlabs_client is not None
+        "elevenlabs_available": ELEVENLABS_API_KEY is not None
     }
 
 
