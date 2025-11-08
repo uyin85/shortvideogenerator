@@ -130,7 +130,7 @@ def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "
         
         data = {
             "text": text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": "eleven_turbo_v2",
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75
