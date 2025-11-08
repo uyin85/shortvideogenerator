@@ -8,3 +8,5 @@ aiofiles
 numpy
 pyttsx3
 groq
+elevenlabs
+python-multipart
