@@ -269,7 +269,7 @@ def generate_word_timings(text: str, duration: float):
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
     
-    # ASS file header with styling - UPDATED FOR CENTERED TEXT
+    # ASS file header with styling - CENTERED (Alignment=5), 768x768
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -287,40 +287,46 @@ Style: Highlight,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,1
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
+    if not word_timings:
+        # Fallback: empty subtitle
+        ass_content += "Dialogue: 0,0:00:00.00,0:00:03.00,Default,,0,0,0,, \n"
+        with open(subtitle_path, "w", encoding="utf-8") as f:
+            f.write(ass_content)
+        return
+
     if effect == "karaoke":
-        # ✅ FIXED: Removed the static base layer that caused double-text ghosting
-        # Now only render the progressively highlighted line
+        # ✅ FIXED: No static base layer → no double text
+        # ✅ Each word's subtitle stays visible until the END → no blinking
+        final_end = word_timings[-1]["end"]
         
-        for timing in word_timings:
+        for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
-            end = format_time_ass(timing["end"])
+            end = format_time_ass(final_end)  # Persist until end
             
-            # Build the text up to and including the current word
+            # Build sentence up to and including current word
             current_words = []
             for t in word_timings:
                 if t["end"] <= timing["end"]:
                     if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                        # Current word - yellow highlight + bold
+                        # Highlight current word in yellow + bold
                         current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                     else:
-                        # Already spoken words - white
+                        # Already spoken: white
                         current_words.append(t["word"])
                 else:
-                    # Future words - don't show yet
+                    # Future words: skip
                     break
             
             highlighted_text = " ".join(current_words)
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
     
     elif effect == "fade":
-        # Fade in effect
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
-        # Typewriter: reveal text progressively with word timing
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             end = format_time_ass(word_timings[-1]["end"])
@@ -328,15 +334,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
     
     elif effect == "bouncing":
-        # Bouncing text animation - UPDATED FOR CENTER
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
-        # Bounce animation from center
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
     
     else:  # static
-        # Static text at center
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
@@ -344,8 +347,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
-
-
+        
 
 def format_time_ass(seconds):
     """Convert seconds to ASS timestamp format (0:00:00.00)"""
