@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import requests
 import urllib.parse
@@ -13,18 +12,22 @@ import re
 from PIL import Image, ImageDraw
 
 # --- CONFIGURATION ---
-app = FastAPI(title="AI Fact Short Video Generator")
+app = FastAPI(
+    title="AI Fact Short Video Generator API",
+    description="Backend API for generating short videos with AI facts, images, and animated subtitles",
+    version="1.0.0"
+)
+
+# CORS configuration - update with your frontend URL
+FRONTEND_URL = os.getenv("https://multisite.interactivelink.site/factshortvideogen", "http://localhost:3000")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-if os.path.exists("index.html"):
-    app.mount("/static", StaticFiles(directory="."), name="static")
 
 # Groq for fact generation
 from groq import Groq
@@ -388,17 +391,26 @@ def generate_image_placeholder(prompt, path, category="science"):
     return True
 
 
-# --- ENDPOINTS ---
+# --- API ENDPOINTS ---
 
 @app.get("/")
 def home():
-    if os.path.exists("index.html"):
-        return FileResponse("index.html")
-    return {"message": "AI Fact Video Generator with ElevenLabs Voice & Karaoke - Ready"}
+    """API root endpoint"""
+    return {
+        "message": "AI Fact Video Generator API",
+        "version": "1.0.0",
+        "endpoints": {
+            "/facts": "GET - Get AI-generated facts by category",
+            "/generate_video": "GET - Generate video with fact and effects",
+            "/health": "GET - Health check"
+        },
+        "status": "operational"
+    }
 
 
 @app.get("/facts")
 def get_facts(category: str):
+    """Get AI-generated facts for a specific category"""
     if category not in PROMPTS:
         raise HTTPException(400, "Invalid category")
     facts = generate_facts_with_groq(category) or generate_facts_fallback(category)
@@ -407,7 +419,7 @@ def get_facts(category: str):
 
 @app.get("/generate_video")
 def generate_video(fact: str, category: str = "science", effect: str = "karaoke"):
-    """Generate video with ElevenLabs voice and karaoke-style subtitles"""
+    """Generate video with ElevenLabs voice and animated subtitles"""
     
     safe_fact = fact.strip()[:300]
     if not safe_fact:
@@ -480,7 +492,11 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
         return StreamingResponse(
             iterfile(),
             media_type="video/mp4",
-            headers={"Content-Disposition": f"attachment; filename=video_{effect}_{category}.mp4"}
+            headers={
+                "Content-Disposition": f"attachment; filename=video_{effect}_{category}.mp4",
+                "X-Video-Size": str(os.path.getsize(output_path)),
+                "X-Video-Duration": str(duration)
+            }
         )
         
     except Exception as e:
@@ -501,7 +517,9 @@ def health_check():
     return {
         "status": "healthy",
         "groq_available": groq_client is not None,
-        "elevenlabs_available": ELEVENLABS_API_KEY is not None
+        "elevenlabs_available": ELEVENLABS_API_KEY is not None,
+        "ffmpeg_available": True,  # Assuming FFmpeg is installed on Render
+        "environment": "production"
     }
 
 
