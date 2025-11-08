@@ -291,10 +291,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     if effect == "karaoke":
         n = len(word_timings)
+        final_end = word_timings[-1]["end"]  # Audio duration
+        
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
-            # End when next word starts (or at sentence end if last word)
-            end_time = word_timings[i + 1]["start"] if i < n - 1 else word_timings[-1]["end"]
+            
+            # For all words EXCEPT last → end at next word's start
+            # For LAST word → end at final_end (so text stays visible)
+            if i < n - 1:
+                end_time = word_timings[i + 1]["start"]
+            else:
+                end_time = final_end  # 👈 This is the key fix!
             end = format_time_ass(end_time)
             
             # Build progressively revealed sentence
