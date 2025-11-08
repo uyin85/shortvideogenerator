@@ -265,7 +265,7 @@ def generate_word_timings(text: str, duration: float):
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
     
-    # ASS file header with styling - UPDATED FOR CENTERED TEXT
+    # ASS header for 768x768 centered subtitles
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -277,69 +277,61 @@ ScaledBorderAndShadow: yes
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,384,1
-Style: Highlight,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,384,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
+    if not word_timings:
+        # Fallback: display empty for 3 seconds
+        ass_content += "Dialogue: 0,0:00:00.00,0:00:03.00,Default,,0,0,0,, \n"
+        with open(subtitle_path, "w", encoding="utf-8") as f:
+            f.write(ass_content)
+        return
+
     if effect == "karaoke":
-        # IMPROVED Karaoke effect: word-by-word yellow highlight with proper timing
-        full_text = " ".join([w["word"] for w in word_timings])
-        
-        # First, show the full text in white (base layer)
-        start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"])
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
-        
-        # Then, create karaoke highlights with precise timing
-        for timing in word_timings:
+        n = len(word_timings)
+        for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
-            end = format_time_ass(timing["end"])
+            # End when next word starts (or at sentence end if last word)
+            end_time = word_timings[i + 1]["start"] if i < n - 1 else word_timings[-1]["end"]
+            end = format_time_ass(end_time)
             
-            # Build the text up to and including the current word
+            # Build progressively revealed sentence
             current_words = []
             for t in word_timings:
                 if t["end"] <= timing["end"]:
                     if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                        # Current word - yellow highlight
+                        # Highlight current word in yellow + bold
                         current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                     else:
-                        # Already spoken words - white
                         current_words.append(t["word"])
                 else:
-                    # Future words - don't show yet
                     break
-            
             highlighted_text = " ".join(current_words)
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
     
     elif effect == "fade":
-        # Fade in effect
-        full_text = " ".join([w["word"] for w in word_timings])
+        full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
-        # Typewriter: reveal text progressively with word timing
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             end = format_time_ass(word_timings[-1]["end"])
-            text_so_far = " ".join([w["word"] for w in word_timings[:i+1]])
+            text_so_far = " ".join(w["word"] for w in word_timings[:i+1])
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
     
     elif effect == "bouncing":
-        # Bouncing text animation - UPDATED FOR CENTER
-        full_text = " ".join([w["word"] for w in word_timings])
+        full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
-        # Bounce animation from center
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
     
     else:  # static
-        # Static text at center
-        full_text = " ".join([w["word"] for w in word_timings])
+        full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
