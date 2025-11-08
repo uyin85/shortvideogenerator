@@ -41,10 +41,6 @@ if os.getenv("GROQ_API_KEY"):
     except Exception as e:
         print(f"Groq init warning: {e}")
 
-# ElevenLabs for TTS
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
-ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
-
 PROMPTS = {
     "science": "Give me 5 short surprising science facts. One sentence each, under 15 words.",
     "successful_person": "Give me 5 short inspiring facts about successful people. One sentence each, under 15 words.",
@@ -61,147 +57,116 @@ CATEGORY_COLORS = {
     "sports": ["#FF6B6B", "#4ECDC4"]
 }
 
-# ElevenLabs voice IDs
-VOICE_IDS = {
-    "science": "21m00Tcm4TlvDq8ikWAM",      # Rachel - Clear, professional female
-    "successful_person": "pNInz6obpgDQGcFmaJgB",  # Adam - Confident male
-    "unsolved_mystery": "AZnzlk1XvdvUeBnXmlld",   # Domi - Mysterious female
-    "history": "ErXwobaYiN019PkySvjV",      # Antoni - Deep narrative male
-    "sports": "TxGEqnHWrfWFTfGW9XjX"          # Josh - Energetic male
-}
+# --- TTS FUNCTIONS ---
 
-# --- HELPER FUNCTIONS ---
-
-def generate_facts_with_groq(category: str):
-    if not groq_client:
-        return None
+def generate_audio_with_pyttsx3(text: str, audio_path: str):
+    """Generate audio using pyttsx3 (completely offline)"""
     try:
-        prompt = PROMPTS.get(category, PROMPTS["science"])
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "Return exactly 5 facts, one per line, no bullets, no numbers."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.8
-        )
-        lines = response.choices[0].message.content.strip().split("\n")
-        facts = []
-        for line in lines:
-            cleaned = line.strip().strip("\"'•-—12345.")
-            if 10 < len(cleaned) < 120:
-                facts.append(cleaned)
-            if len(facts) >= 5:
+        import pyttsx3
+        
+        # Initialize the TTS engine
+        engine = pyttsx3.init()
+        
+        # Configure voice properties
+        voices = engine.getProperty('voices')
+        
+        # Try to use a female voice if available
+        for voice in voices:
+            if 'female' in voice.name.lower() or 'zira' in voice.name.lower():
+                engine.setProperty('voice', voice.id)
                 break
-        return facts[:5] or None
-    except Exception as e:
-        print(f"Groq fact gen failed: {e}")
-        return None
-
-
-def generate_facts_fallback(category: str):
-    defaults = {
-        "science": ["Bananas are naturally radioactive.", "Octopuses have three hearts.", "Honey never spoils.", "Venus rotates backward.", "Your stomach acid can dissolve metal."],
-        "successful_person": ["Oprah was fired from her first TV job.", "Steve Jobs was adopted.", "JK Rowling was rejected 12 times.", "Colonel Sanders started KFC at 65.", "Walt Disney was fired for lacking imagination."],
-        "unsolved_mystery": ["The Voynich manuscript remains undeciphered.", "DB Cooper vanished after hijacking.", "The Bermuda Triangle mystery continues.", "Zodiac Killer was never caught.", "Oak Island money pit unsolved."],
-        "history": ["Cleopatra lived closer to iPhone than pyramids.", "Oxford University predates Aztec Empire.", "The Great Wall visible from space myth.", "Napoleon was actually average height.", "Vikings discovered America before Columbus."],
-        "sports": ["Michael Jordan was cut from high school team.", "Usain Bolt has scoliosis.", "Serena Williams holds 23 Grand Slams.", "Muhammad Ali won Olympic gold medal.", "Pele scored 1283 career goals."]
-    }
-    return defaults.get(category, defaults["science"])
-
-
-def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "science"):
-    """Generate audio using ElevenLabs TTS API via REST"""
-    if not ELEVENLABS_API_KEY:
-        print("ElevenLabs API key not set, using fallback")
-        return generate_audio_fallback(text, audio_path)
-    
-    try:
-        # Select voice based on category
-        voice_id = VOICE_IDS.get(category, VOICE_IDS["science"])
         
-        print(f"Generating audio with ElevenLabs voice ID: {voice_id}")
+        # Set speech properties
+        engine.setProperty('rate', 180)    # Speed percent
+        engine.setProperty('volume', 0.9)  # Volume 0-1
         
-        # Make API request - UPDATED MODEL
-        url = f"{ELEVENLABS_API_URL}/{voice_id}"
-        headers = {
-            "Accept": "audio/mpeg",
-            "Content-Type": "application/json",
-            "xi-api-key": ELEVENLABS_API_KEY
-        }
+        # Save to file
+        engine.save_to_file(text, audio_path)
+        engine.runAndWait()
         
-        data = {
-            "text": text,
-            "model_id": "eleven_multilingual_v2",  # UPDATED: Changed from eleven_monolingual_v1
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.75
-            }
-        }
-        
-        response = requests.post(url, json=data, headers=headers, timeout=30)
-        
-        if response.status_code != 200:
-            print(f"ElevenLabs API error: {response.status_code} - {response.text}")
-            return generate_audio_fallback(text, audio_path)
-        
-        # Save audio
-        temp_mp3 = audio_path.replace(".mp3", "_temp.mp3")
-        with open(temp_mp3, 'wb') as f:
-            f.write(response.content)
-        
-        # Get audio duration using ffprobe
-        try:
-            result = subprocess.run([
-                "ffprobe", "-v", "error", "-show_entries",
-                "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
-                temp_mp3
-            ], capture_output=True, text=True, timeout=10)
-            duration = float(result.stdout.strip())
-        except:
-            # Estimate duration if ffprobe fails
+        # Check if file was created
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+            # Estimate duration
             duration = len(text.split()) * 0.5 + 1.0
-        
-        # Convert to standard format with FFmpeg
-        subprocess.run([
-            "ffmpeg", "-i", temp_mp3,
-            "-acodec", "libmp3lame", "-b:a", "128k",
-            "-ar", "22050",
-            audio_path, "-y", "-loglevel", "error"
-        ], timeout=30)
-        
-        # Cleanup temp file
-        if os.path.exists(temp_mp3):
-            os.unlink(temp_mp3)
-        
-        success = os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000
-        print(f"Audio generation {'succeeded' if success else 'failed'}, duration: {duration}s")
-        return success, duration
-        
+            return True, duration
+        else:
+            return False, 0.0
+            
     except Exception as e:
-        print(f"ElevenLabs TTS error: {e}")
-        return generate_audio_fallback(text, audio_path)
+        print(f"pyttsx3 error: {e}")
+        return False, 0.0
 
+def generate_audio_with_gtts(text: str, audio_path: str):
+    """Generate audio using gTTS (Google Text-to-Speech)"""
+    try:
+        from gtts import gTTS
+        
+        # Create gTTS object
+        tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save as MP3
+        tts.save(audio_path)
+        
+        # Check if file was created
+        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+            # Estimate duration
+            duration = len(text.split()) * 0.5 + 1.0
+            return True, duration
+        else:
+            return False, 0.0
+            
+    except Exception as e:
+        print(f"gTTS error: {e}")
+        return False, 0.0
 
 def generate_audio_fallback(text: str, audio_path: str):
-    """Generate silent audio as fallback"""
+    """Generate enhanced fallback audio"""
     try:
         words = text.split()
-        duration = len(words) * 0.5 + 1.0  # ~0.5s per word
+        duration = len(words) * 0.5 + 1.0
         
-        # Create silent audio
+        # Create audio with some variation instead of complete silence
         subprocess.run([
-            "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
-            "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "128k",
+            "ffmpeg", "-f", "lavfi", 
+            "-i", f"sine=frequency=300:duration={duration}",
+            "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5,volume=0.1",
+            "-acodec", "libmp3lame", "-b:a", "64k",
             audio_path, "-y", "-loglevel", "error"
         ], timeout=30)
         
         return os.path.exists(audio_path), duration
     except Exception as e:
-        print(f"Audio fallback error: {e}")
-        return False, 0.0
+        print(f"Enhanced fallback error: {e}")
+        # Ultimate fallback - silent audio
+        subprocess.run([
+            "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+            "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "128k",
+            audio_path, "-y", "-loglevel", "error"
+        ], timeout=30)
+        return os.path.exists(audio_path), duration
 
+def generate_audio(text: str, audio_path: str, category: str = "science"):
+    """Generate audio using the best available TTS method"""
+    
+    # Try pyttsx3 first (completely offline)
+    print("Trying pyttsx3 (offline TTS)...")
+    success, duration = generate_audio_with_pyttsx3(text, audio_path)
+    if success:
+        print("✅ Audio generated with pyttsx3")
+        return success, duration
+    
+    # Try gTTS as fallback (requires internet)
+    print("Trying gTTS (Google TTS)...")
+    success, duration = generate_audio_with_gtts(text, audio_path)
+    if success:
+        print("✅ Audio generated with gTTS")
+        return success, duration
+    
+    # Ultimate fallback
+    print("Using enhanced fallback audio...")
+    return generate_audio_fallback(text, audio_path)
+
+# --- VIDEO GENERATION FUNCTIONS ---
 
 def generate_word_timings(text: str, duration: float):
     """Generate word timings for karaoke effect"""
@@ -224,11 +189,10 @@ def generate_word_timings(text: str, duration: float):
     
     return timings
 
-
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
-    """Create ASS subtitle file with karaoke or other effects"""
+    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
     
-    # ASS file header with styling
+    # ASS file header with styling - UPDATED FOR CENTERED TEXT
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -239,8 +203,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,10,10,60,1
-Style: Highlight,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,10,10,60,1
+Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,384,1
+Style: Highlight,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,384,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -279,15 +243,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
     
     elif effect == "bouncing":
-        # Bouncing text animation
+        # Bouncing text animation - UPDATED FOR CENTER
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
-        # Bounce animation using move and scale
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,800,384,680,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
+        # Bounce animation from center
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
     
     else:  # static
-        # Static text at bottom
+        # Static text at center
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
@@ -296,7 +260,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
 
-
 def format_time_ass(seconds):
     """Convert seconds to ASS timestamp format (0:00:00.00)"""
     hours = int(seconds // 3600)
@@ -304,16 +267,15 @@ def format_time_ass(seconds):
     secs = seconds % 60
     return f"{hours}:{minutes:02d}:{secs:05.2f}"
 
-
 def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_path, duration):
-    """Create video with image, audio, and ASS subtitles"""
+    """Create video with image, audio, and ASS subtitles - CENTERED TEXT"""
     
-    # FFmpeg command with ASS subtitle overlay
+    # FFmpeg command with ASS subtitle overlay - UPDATED FOR CENTERED TEXT
     cmd = [
         "ffmpeg",
         "-loop", "1", "-i", image_path,
         "-i", audio_path,
-        "-vf", f"scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,subtitles={subtitle_path}:force_style='Alignment=2,MarginV=50'",
+        "-vf", f"scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,subtitles={subtitle_path}",
         "-c:v", "libx264",
         "-preset", "medium",
         "-c:a", "aac",
@@ -336,7 +298,6 @@ def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_pa
         print(f"Video creation error: {e}")
         return False
 
-
 def generate_image_pollinations(prompt, path):
     try:
         # Enhanced prompt for better visuals
@@ -351,7 +312,6 @@ def generate_image_pollinations(prompt, path):
     except Exception as e:
         print(f"Pollinations failed: {e}")
     return False
-
 
 def generate_image_placeholder(prompt, path, category="science"):
     width, height = 768, 768
@@ -393,6 +353,44 @@ def generate_image_placeholder(prompt, path, category="science"):
     print(f"Placeholder image generated")
     return True
 
+# --- HELPER FUNCTIONS ---
+
+def generate_facts_with_groq(category: str):
+    if not groq_client:
+        return None
+    try:
+        prompt = PROMPTS.get(category, PROMPTS["science"])
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Return exactly 5 facts, one per line, no bullets, no numbers."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.8
+        )
+        lines = response.choices[0].message.content.strip().split("\n")
+        facts = []
+        for line in lines:
+            cleaned = line.strip().strip("\"'•-—12345.")
+            if 10 < len(cleaned) < 120:
+                facts.append(cleaned)
+            if len(facts) >= 5:
+                break
+        return facts[:5] or None
+    except Exception as e:
+        print(f"Groq fact gen failed: {e}")
+        return None
+
+def generate_facts_fallback(category: str):
+    defaults = {
+        "science": ["Bananas are naturally radioactive.", "Octopuses have three hearts.", "Honey never spoils.", "Venus rotates backward.", "Your stomach acid can dissolve metal."],
+        "successful_person": ["Oprah was fired from her first TV job.", "Steve Jobs was adopted.", "JK Rowling was rejected 12 times.", "Colonel Sanders started KFC at 65.", "Walt Disney was fired for lacking imagination."],
+        "unsolved_mystery": ["The Voynich manuscript remains undeciphered.", "DB Cooper vanished after hijacking.", "The Bermuda Triangle mystery continues.", "Zodiac Killer was never caught.", "Oak Island money pit unsolved."],
+        "history": ["Cleopatra lived closer to iPhone than pyramids.", "Oxford University predates Aztec Empire.", "The Great Wall visible from space myth.", "Napoleon was actually average height.", "Vikings discovered America before Columbus."],
+        "sports": ["Michael Jordan was cut from high school team.", "Usain Bolt has scoliosis.", "Serena Williams holds 23 Grand Slams.", "Muhammad Ali won Olympic gold medal.", "Pele scored 1283 career goals."]
+    }
+    return defaults.get(category, defaults["science"])
 
 # --- API ENDPOINTS ---
 
@@ -409,9 +407,9 @@ def home():
             "/test": "GET - Test endpoint"
         },
         "status": "operational",
-        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen"
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
+        "tts_engine": "pyttsx3 + gTTS"
     }
-
 
 @app.get("/test")
 def test_endpoint():
@@ -422,7 +420,6 @@ def test_endpoint():
         "timestamp": "2024-01-01T00:00:00Z"
     }
 
-
 @app.get("/facts")
 def get_facts(category: str):
     """Get AI-generated facts for a specific category"""
@@ -431,10 +428,9 @@ def get_facts(category: str):
     facts = generate_facts_with_groq(category) or generate_facts_fallback(category)
     return {"facts": facts}
 
-
 @app.get("/generate_video")
 def generate_video(fact: str, category: str = "science", effect: str = "karaoke"):
-    """Generate video with ElevenLabs voice and animated subtitles"""
+    """Generate video with Python TTS and centered animated subtitles"""
     
     safe_fact = fact.strip()[:300]
     if not safe_fact:
@@ -459,9 +455,9 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
                 generate_image_placeholder(safe_fact, img_path, category)):
             raise HTTPException(500, "Image generation failed")
         
-        # Step 2: Generate audio with ElevenLabs
-        print("Step 2: Generating voice with ElevenLabs...")
-        audio_success, duration = generate_audio_with_elevenlabs(safe_fact, audio_path, category)
+        # Step 2: Generate audio with Python TTS
+        print("Step 2: Generating voice with Python TTS...")
+        audio_success, duration = generate_audio(safe_fact, audio_path, category)
         if not audio_success:
             raise HTTPException(500, "Audio generation failed")
         
@@ -473,12 +469,12 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
         word_timings = generate_word_timings(safe_fact, duration)
         print(f"Generated {len(word_timings)} word timings")
         
-        # Step 4: Create subtitle file with selected effect
-        print(f"Step 4: Creating {effect} subtitles...")
+        # Step 4: Create subtitle file with selected effect - CENTERED
+        print(f"Step 4: Creating {effect} subtitles (centered)...")
         create_karaoke_subtitles(word_timings, subtitle_path, effect)
         
-        # Step 5: Create final video with subtitles
-        print("Step 5: Composing final video...")
+        # Step 5: Create final video with centered subtitles
+        print("Step 5: Composing final video with centered text...")
         if not create_video_with_subtitles(img_path, audio_path, subtitle_path, output_path, duration):
             raise HTTPException(500, "Video composition failed")
         
@@ -526,20 +522,18 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
                     pass
         raise HTTPException(500, f"Video generation error: {str(e)}")
 
-
 @app.get("/health")
 def health_check():
     """Health check endpoint"""
     return {
         "status": "healthy",
         "groq_available": groq_client is not None,
-        "elevenlabs_available": ELEVENLABS_API_KEY is not None,
+        "tts_available": True,
         "ffmpeg_available": True,
         "environment": "production",
         "cors_enabled": True,
         "frontend_url": "https://multisite.interactivelink.site/factshortvideogen"
     }
-
 
 # --- Run server ---
 if __name__ == "__main__":
