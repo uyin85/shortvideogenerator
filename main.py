@@ -263,7 +263,7 @@ def generate_word_timings(text: str, duration: float):
     return analyze_speech_pattern(text, duration)
 
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
-    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
+    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT - FIXED"""
     
     # ASS header for 768x768 centered subtitles
     ass_content = """[Script Info]
@@ -290,57 +290,71 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         return
 
     if effect == "karaoke":
-        n = len(word_timings)
-        final_end = word_timings[-1]["end"]  # Audio duration
+        # Calculate video end time (add 2 seconds after last word ends)
+        video_end = word_timings[-1]["end"] + 2.0
+        
+        # Show full white text from start, then highlight words as they're spoken
+        full_text = " ".join(w["word"] for w in word_timings)
         
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             
-            # For all words EXCEPT last → end at next word's start
-            # For LAST word → end at final_end (so text stays visible)
-            if i < n - 1:
-                end_time = word_timings[i + 1]["start"]
-            else:
-                end_time = final_end  # 👈 This is the key fix!
-            end = format_time_ass(end_time)
+            # Each dialogue shows from word start to video end (text stays visible)
+            end = format_time_ass(video_end)
             
-            # Build progressively revealed sentence
-            current_words = []
-            for t in word_timings:
-                if t["end"] <= timing["end"]:
-                    if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                        # Highlight current word in yellow + bold
-                        current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
-                    else:
-                        current_words.append(t["word"])
+            # Build sentence with current word highlighted in yellow
+            highlighted_words = []
+            for j, t in enumerate(word_timings):
+                if j < i:
+                    # Already spoken - keep white
+                    highlighted_words.append(t["word"])
+                elif j == i:
+                    # Currently speaking - yellow + bold
+                    highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                 else:
-                    break
-            highlighted_text = " ".join(current_words)
+                    # Not yet spoken - white
+                    highlighted_words.append(t["word"])
+            
+            highlighted_text = " ".join(highlighted_words)
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
     
     elif effect == "fade":
         full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
+        # Show each word appearing one by one, but keep all previous words visible
+        video_end = word_timings[-1]["end"] + 2.0
+        
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
-            end = format_time_ass(word_timings[-1]["end"])
+            
+            # End time: if not last word, end when next word appears
+            # If last word, end at video_end to keep text visible
+            if i < len(word_timings) - 1:
+                end = format_time_ass(word_timings[i + 1]["start"])
+            else:
+                end = format_time_ass(video_end)
+            
+            # Show all words up to and including current word
             text_so_far = " ".join(w["word"] for w in word_timings[:i+1])
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
     
     elif effect == "bouncing":
         full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
     
     else:  # static
         full_text = " ".join(w["word"] for w in word_timings)
         start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
     
     with open(subtitle_path, "w", encoding="utf-8") as f:
@@ -354,9 +368,12 @@ def format_time_ass(seconds):
     return f"{hours}:{minutes:02d}:{secs:05.2f}"
 
 def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_path, duration):
-    """Create video with image, audio, and ASS subtitles - CENTERED TEXT"""
+    """Create video with image, audio, and ASS subtitles - EXTENDED DURATION"""
     
-    # FFmpeg command with ASS subtitle overlay - UPDATED FOR CENTERED TEXT
+    # Extend video duration by 2 seconds to keep text visible after audio ends
+    video_duration = duration + 2.0
+    
+    # FFmpeg command with ASS subtitle overlay
     cmd = [
         "ffmpeg",
         "-loop", "1", "-i", image_path,
@@ -366,9 +383,8 @@ def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_pa
         "-preset", "medium",
         "-c:a", "aac",
         "-b:a", "128k",
-        "-t", str(duration),
+        "-t", str(video_duration),  # Use extended duration
         "-pix_fmt", "yuv420p",
-        "-shortest",
         "-y",
         "-loglevel", "error",
         output_path
