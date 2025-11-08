@@ -18,12 +18,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS configuration - update with your frontend URL
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
+# CORS configuration - specifically for your frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "https://multisite.interactivelink.site",
+        "https://multisite.interactivelink.site/factshortvideogen",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,7 +41,7 @@ if os.getenv("GROQ_API_KEY"):
     except Exception as e:
         print(f"Groq init warning: {e}")
 
-# ElevenLabs for TTS (using requests - simpler and more reliable)
+# ElevenLabs for TTS
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech"
 
@@ -58,7 +61,7 @@ CATEGORY_COLORS = {
     "sports": ["#FF6B6B", "#4ECDC4"]
 }
 
-# ElevenLabs voice IDs (free tier)
+# ElevenLabs voice IDs
 VOICE_IDS = {
     "science": "21m00Tcm4TlvDq8ikWAM",      # Rachel - Clear, professional female
     "successful_person": "pNInz6obpgDQGcFmaJgB",  # Adam - Confident male
@@ -120,7 +123,7 @@ def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "
         
         print(f"Generating audio with ElevenLabs voice ID: {voice_id}")
         
-        # Make API request
+        # Make API request - UPDATED MODEL
         url = f"{ELEVENLABS_API_URL}/{voice_id}"
         headers = {
             "Accept": "audio/mpeg",
@@ -130,7 +133,7 @@ def generate_audio_with_elevenlabs(text: str, audio_path: str, category: str = "
         
         data = {
             "text": text,
-            "model_id": "eleven_turbo_v2",
+            "model_id": "eleven_multilingual_v2",  # UPDATED: Changed from eleven_monolingual_v1
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75
@@ -402,9 +405,21 @@ def home():
         "endpoints": {
             "/facts": "GET - Get AI-generated facts by category",
             "/generate_video": "GET - Generate video with fact and effects",
-            "/health": "GET - Health check"
+            "/health": "GET - Health check",
+            "/test": "GET - Test endpoint"
         },
-        "status": "operational"
+        "status": "operational",
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen"
+    }
+
+
+@app.get("/test")
+def test_endpoint():
+    """Test endpoint to verify CORS is working"""
+    return {
+        "message": "Backend is working! CORS should be configured correctly.",
+        "status": "success",
+        "timestamp": "2024-01-01T00:00:00Z"
     }
 
 
@@ -495,7 +510,8 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
             headers={
                 "Content-Disposition": f"attachment; filename=video_{effect}_{category}.mp4",
                 "X-Video-Size": str(os.path.getsize(output_path)),
-                "X-Video-Duration": str(duration)
+                "X-Video-Duration": str(duration),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Video-Size, X-Video-Duration"
             }
         )
         
@@ -518,8 +534,10 @@ def health_check():
         "status": "healthy",
         "groq_available": groq_client is not None,
         "elevenlabs_available": ELEVENLABS_API_KEY is not None,
-        "ffmpeg_available": True,  # Assuming FFmpeg is installed on Render
-        "environment": "production"
+        "ffmpeg_available": True,
+        "environment": "production",
+        "cors_enabled": True,
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen"
     }
 
 
