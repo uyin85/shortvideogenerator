@@ -60,56 +60,12 @@ CATEGORY_COLORS = {
 
 # --- TTS FUNCTIONS ---
 
-def generate_audio_with_pyttsx3(text: str, audio_path: str):
-    """Generate audio using pyttsx3 (completely offline)"""
-    try:
-        import pyttsx3
-        
-        # Initialize the TTS engine
-        engine = pyttsx3.init()
-        
-        # Configure voice properties
-        voices = engine.getProperty('voices')
-        
-        # Try to use a female voice if available
-        for voice in voices:
-            if 'female' in voice.name.lower() or 'zira' in voice.name.lower():
-                engine.setProperty('voice', voice.id)
-                break
-        
-        # Set speech properties
-        engine.setProperty('rate', 180)    # Speed percent
-        engine.setProperty('volume', 0.9)  # Volume 0-1
-        
-        # Save to file
-        engine.save_to_file(text, audio_path)
-        engine.runAndWait()
-        
-        # Check if file was created
-        if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
-            # Get actual duration using ffprobe
-            try:
-                result = subprocess.run([
-                    "ffprobe", "-v", "error", "-show_entries",
-                    "format=duration", "-of", "default=noprint_wrappers=1:nokey=1",
-                    audio_path
-                ], capture_output=True, text=True, timeout=10)
-                duration = float(result.stdout.strip())
-            except:
-                # Estimate duration if ffprobe fails
-                duration = len(text.split()) * 0.5 + 1.0
-            return True, duration
-        else:
-            return False, 0.0
-            
-    except Exception as e:
-        print(f"pyttsx3 error: {e}")
-        return False, 0.0
-
 def generate_audio_with_gtts(text: str, audio_path: str):
     """Generate audio using gTTS (Google Text-to-Speech)"""
     try:
         from gtts import gTTS
+        
+        print(f"Generating audio with gTTS for text: {text[:50]}...")
         
         # Create gTTS object
         tts = gTTS(text=text, lang='en', slow=False)
@@ -127,11 +83,14 @@ def generate_audio_with_gtts(text: str, audio_path: str):
                     audio_path
                 ], capture_output=True, text=True, timeout=10)
                 duration = float(result.stdout.strip())
-            except:
+                print(f"gTTS success: {os.path.getsize(audio_path)} bytes, {duration:.2f}s duration")
+            except Exception as e:
+                print(f"ffprobe error, estimating duration: {e}")
                 # Estimate duration if ffprobe fails
                 duration = len(text.split()) * 0.5 + 1.0
             return True, duration
         else:
+            print("gTTS failed: File too small or not created")
             return False, 0.0
             
     except Exception as e:
@@ -139,50 +98,89 @@ def generate_audio_with_gtts(text: str, audio_path: str):
         return False, 0.0
 
 def generate_audio_fallback(text: str, audio_path: str):
-    """Generate enhanced fallback audio"""
+    """Generate enhanced fallback audio with better quality"""
     try:
         words = text.split()
-        duration = len(words) * 0.5 + 1.0
+        duration = max(len(words) * 0.5 + 1.0, 3.0)  # Minimum 3 seconds
         
-        # Create audio with some variation instead of complete silence
-        subprocess.run([
-            "ffmpeg", "-f", "lavfi", 
-            "-i", f"sine=frequency=300:duration={duration}",
-            "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5,volume=0.1",
-            "-acodec", "libmp3lame", "-b:a", "64k",
-            audio_path, "-y", "-loglevel", "error"
-        ], timeout=30)
+        print(f"Generating enhanced fallback audio: {duration:.2f}s duration")
+        
+        # Create more natural-sounding audio with varying tones
+        # This creates a more pleasant background sound instead of pure silence
+        base_freq = 200  # Base frequency
+        words = text.split()
+        
+        if len(words) > 0:
+            # Create a filter chain that varies with the text
+            filter_chain = []
+            for i, word in enumerate(words):
+                word_duration = duration / len(words)
+                start_time = i * word_duration
+                freq_variation = base_freq + (len(word) * 10)  # Vary frequency by word length
+                
+                filter_chain.append(
+                    f"sine=frequency={freq_variation}:duration={word_duration}:"
+                    f"sample_rate=22050,adelay={int(start_time * 1000)}|{int(start_time * 1000)}"
+                )
+            
+            # Mix all the sine waves together
+            filter_complex = f"{'+'.join(filter_chain)}"
+            
+            subprocess.run([
+                "ffmpeg", "-f", "lavfi",
+                "-i", filter_complex,
+                "-af", f"volume=0.05,afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5",
+                "-acodec", "libmp3lame", "-b:a", "64k", "-ar", "22050",
+                "-t", str(duration),
+                audio_path, "-y", "-loglevel", "error"
+            ], timeout=30)
+        else:
+            # Simple tone for very short text
+            subprocess.run([
+                "ffmpeg", "-f", "lavfi", 
+                "-i", f"sine=frequency=300:duration={duration}",
+                "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5,volume=0.05",
+                "-acodec", "libmp3lame", "-b:a", "64k", "-ar", "22050",
+                audio_path, "-y", "-loglevel", "error"
+            ], timeout=30)
+        
+        success = os.path.exists(audio_path) and os.path.getsize(audio_path) > 500
+        if success:
+            print(f"Enhanced fallback success: {os.path.getsize(audio_path)} bytes")
+        else:
+            print("Enhanced fallback failed, using basic fallback")
+            # Ultimate fallback - silent audio
+            subprocess.run([
+                "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+                "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "64k",
+                audio_path, "-y", "-loglevel", "error"
+            ], timeout=30)
         
         return os.path.exists(audio_path), duration
+        
     except Exception as e:
         print(f"Enhanced fallback error: {e}")
         # Ultimate fallback - silent audio
+        duration = len(text.split()) * 0.5 + 1.0
         subprocess.run([
             "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
-            "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "128k",
+            "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "64k",
             audio_path, "-y", "-loglevel", "error"
         ], timeout=30)
         return os.path.exists(audio_path), duration
 
 def generate_audio(text: str, audio_path: str, category: str = "science"):
-    """Generate audio using the best available TTS method"""
+    """Generate audio using gTTS with enhanced fallback"""
     
-    # Try pyttsx3 first (completely offline)
-    print("Trying pyttsx3 (offline TTS)...")
-    success, duration = generate_audio_with_pyttsx3(text, audio_path)
-    if success:
-        print("✅ Audio generated with pyttsx3")
-        return success, duration
-    
-    # Try gTTS as fallback (requires internet)
-    print("Trying gTTS (Google TTS)...")
+    # Try gTTS first (requires internet)
+    print("Attempting gTTS audio generation...")
     success, duration = generate_audio_with_gtts(text, audio_path)
     if success:
         print("✅ Audio generated with gTTS")
         return success, duration
     
-    # Ultimate fallback
-    print("Using enhanced fallback audio...")
+    # Use enhanced fallback
+    print("gTTS failed, using enhanced fallback audio...")
     return generate_audio_fallback(text, audio_path)
 
 # --- IMPROVED WORD TIMING FUNCTIONS ---
@@ -264,12 +262,10 @@ def generate_word_timings(text: str, duration: float):
     # Use linguistic analysis for better timing
     return analyze_speech_pattern(text, duration)
 
-
-
 def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
     
-    # ASS file header with styling - CENTERED (Alignment=5), 768x768
+    # ASS file header with styling - UPDATED FOR CENTERED TEXT
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -287,46 +283,46 @@ Style: Highlight,Arial,48,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,1
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
     
-    if not word_timings:
-        # Fallback: empty subtitle
-        ass_content += "Dialogue: 0,0:00:00.00,0:00:03.00,Default,,0,0,0,, \n"
-        with open(subtitle_path, "w", encoding="utf-8") as f:
-            f.write(ass_content)
-        return
-
     if effect == "karaoke":
-        # ✅ FIXED: No static base layer → no double text
-        # ✅ Each word's subtitle stays visible until the END → no blinking
-        final_end = word_timings[-1]["end"]
+        # IMPROVED Karaoke effect: word-by-word yellow highlight with proper timing
+        full_text = " ".join([w["word"] for w in word_timings])
         
-        for i, timing in enumerate(word_timings):
+        # First, show the full text in white (base layer)
+        start = format_time_ass(word_timings[0]["start"])
+        end = format_time_ass(word_timings[-1]["end"])
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
+        
+        # Then, create karaoke highlights with precise timing
+        for timing in word_timings:
             start = format_time_ass(timing["start"])
-            end = format_time_ass(final_end)  # Persist until end
+            end = format_time_ass(timing["end"])
             
-            # Build sentence up to and including current word
+            # Build the text up to and including the current word
             current_words = []
             for t in word_timings:
                 if t["end"] <= timing["end"]:
                     if t["word"] == timing["word"] and t["start"] == timing["start"]:
-                        # Highlight current word in yellow + bold
+                        # Current word - yellow highlight
                         current_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                     else:
-                        # Already spoken: white
+                        # Already spoken words - white
                         current_words.append(t["word"])
                 else:
-                    # Future words: skip
+                    # Future words - don't show yet
                     break
             
             highlighted_text = " ".join(current_words)
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
     
     elif effect == "fade":
+        # Fade in effect
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
+        # Typewriter: reveal text progressively with word timing
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             end = format_time_ass(word_timings[-1]["end"])
@@ -334,12 +330,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
     
     elif effect == "bouncing":
+        # Bouncing text animation - UPDATED FOR CENTER
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
+        # Bounce animation from center
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
     
     else:  # static
+        # Static text at center
         full_text = " ".join([w["word"] for w in word_timings])
         start = format_time_ass(word_timings[0]["start"])
         end = format_time_ass(word_timings[-1]["end"])
@@ -347,7 +346,6 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
-        
 
 def format_time_ass(seconds):
     """Convert seconds to ASS timestamp format (0:00:00.00)"""
@@ -497,8 +495,7 @@ def home():
         },
         "status": "operational",
         "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
-        "tts_engine": "pyttsx3 + gTTS",
-        "karaoke_sync": "improved"
+        "tts_engine": "gTTS + Enhanced Fallback"
     }
 
 @app.get("/test")
@@ -520,7 +517,7 @@ def get_facts(category: str):
 
 @app.get("/generate_video")
 def generate_video(fact: str, category: str = "science", effect: str = "karaoke"):
-    """Generate video with Python TTS and centered animated subtitles"""
+    """Generate video with gTTS and centered animated subtitles"""
     
     safe_fact = fact.strip()[:300]
     if not safe_fact:
@@ -545,8 +542,8 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
                 generate_image_placeholder(safe_fact, img_path, category)):
             raise HTTPException(500, "Image generation failed")
         
-        # Step 2: Generate audio with Python TTS
-        print("Step 2: Generating voice with Python TTS...")
+        # Step 2: Generate audio with gTTS
+        print("Step 2: Generating voice with gTTS...")
         audio_success, duration = generate_audio(safe_fact, audio_path, category)
         if not audio_success:
             raise HTTPException(500, "Audio generation failed")
@@ -627,7 +624,8 @@ def health_check():
         "environment": "production",
         "cors_enabled": True,
         "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
-        "karaoke_sync": "improved"
+        "karaoke_sync": "improved",
+        "tts_engine": "gTTS + Enhanced Fallback"
     }
 
 # --- Run server ---
