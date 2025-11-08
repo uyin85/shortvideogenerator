@@ -6,7 +6,8 @@ pillow
 gtts
 aiofiles
 numpy
-pyttsx3
+pyttsx3==2.90
+gtts==2.3.2
 groq
 elevenlabs
 python-multipart
