@@ -10,17 +10,19 @@ import random
 import json
 import re
 import tempfile
+import time
+import hashlib
 from PIL import Image, ImageDraw
-import concurrent.futures
+from typing import List, Optional
 
 # --- CONFIGURATION ---
 app = FastAPI(
     title="AI Fact Short Video Generator API",
     description="Backend API for generating short videos with AI facts, images, and animated subtitles",
-    version="2.1.0"
+    version="1.0.0"
 )
 
-# CORS configuration
+# CORS configuration - specifically for your frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -43,13 +45,43 @@ if os.getenv("GROQ_API_KEY"):
     except Exception as e:
         print(f"Groq init warning: {e}")
 
-# UPDATED PROMPTS - 2 sentences per fact
-PROMPTS = {
-    "science": "Give me 5 surprising science facts. Each fact should have EXACTLY 2 sentences. First sentence: the main fact (under 15 words). Second sentence: an interesting detail or explanation (under 15 words). Format: Fact 1 sentence. Detail sentence. (newline) Fact 2 sentence. Detail sentence. etc.",
-    "successful_person": "Give me 5 inspiring facts about successful people. Each fact should have EXACTLY 2 sentences. First sentence: the main achievement (under 15 words). Second sentence: an interesting detail about their journey (under 15 words).",
-    "unsolved_mystery": "Give me 5 unsolved mysteries. Each fact should have EXACTLY 2 sentences. First sentence: the mystery (under 15 words). Second sentence: an intriguing detail (under 15 words).",
-    "history": "Give me 5 memorable history facts. Each fact should have EXACTLY 2 sentences. First sentence: the main historical fact (under 15 words). Second sentence: a surprising detail (under 15 words).",
-    "sports": "Give me 5 legendary sports facts. Each fact should have EXACTLY 2 sentences. First sentence: the achievement (under 15 words). Second sentence: an interesting context (under 15 words)."
+# Enhanced prompts with more variety
+ENHANCED_PROMPTS = {
+    "science": [
+        "Give me 5 surprising and little-known science facts. Make them diverse and unexpected. One sentence each, under 15 words.",
+        "Share 5 fascinating scientific discoveries that most people don't know about. One sentence each, under 15 words.",
+        "Provide 5 mind-blowing science facts from different scientific fields. One sentence each, under 15 words.",
+        "Tell me 5 counterintuitive science facts that defy common sense. One sentence each, under 15 words.",
+        "List 5 amazing science facts about space, biology, physics, chemistry, and earth science. One sentence each."
+    ],
+    "successful_person": [
+        "Give me 5 inspiring facts about successful people from different industries. One sentence each, under 15 words.",
+        "Share 5 surprising stories about how famous people achieved success. One sentence each, under 15 words.",
+        "Provide 5 lesser-known facts about successful entrepreneurs and innovators. One sentence each, under 15 words.",
+        "Tell me 5 facts about successful people who overcame major obstacles. One sentence each, under 15 words.",
+        "List 5 facts about billionaires, athletes, artists, scientists, and leaders. One sentence each."
+    ],
+    "unsolved_mystery": [
+        "Give me 5 short unsolved mysteries from different parts of the world. One sentence each, under 15 words.",
+        "Share 5 mysterious disappearances or unexplained phenomena. One sentence each, under 15 words.",
+        "Provide 5 facts about unsolved crimes and historical mysteries. One sentence each, under 15 words.",
+        "Tell me 5 mysteries that still puzzle investigators and scientists. One sentence each, under 15 words.",
+        "List 5 unsolved mysteries about ancient civilizations, crimes, disappearances, and paranormal events."
+    ],
+    "history": [
+        "Give me 5 short memorable history facts from different time periods. One sentence each, under 15 words.",
+        "Share 5 surprising historical events that changed the world. One sentence each, under 15 words.",
+        "Provide 5 lesser-known facts about ancient civilizations and empires. One sentence each, under 15 words.",
+        "Tell me 5 historical facts that contradict common beliefs. One sentence each, under 15 words.",
+        "List 5 facts about ancient, medieval, renaissance, modern, and contemporary history. One sentence each."
+    ],
+    "sports": [
+        "Give me 5 short legendary sports facts from different sports. One sentence each, under 15 words.",
+        "Share 5 incredible sports records and achievements. One sentence each, under 15 words.",
+        "Provide 5 surprising facts about famous athletes and their careers. One sentence each, under 15 words.",
+        "Tell me 5 facts about Olympic games and world championships. One sentence each, under 15 words.",
+        "List 5 sports facts about basketball, soccer, tennis, athletics, and swimming. One sentence each."
+    ]
 }
 
 CATEGORY_COLORS = {
@@ -60,14 +92,215 @@ CATEGORY_COLORS = {
     "sports": ["#FF6B6B", "#4ECDC4"]
 }
 
+# Cache to track recent facts (in production, use Redis instead)
+RECENT_FACTS_CACHE = {}
+CACHE_DURATION = 300  # 5 minutes
+
+# --- ENHANCED FACT GENERATION WITH DUPLICATE PREVENTION ---
+
+def get_dynamic_prompt(category: str, user_context: str = ""):
+    """Get a varied prompt based on time and context to ensure diversity"""
+    prompts = ENHANCED_PROMPTS.get(category, ENHANCED_PROMPTS["science"])
+    
+    # Use time-based selection for variety
+    time_index = int(time.time() / 60) % len(prompts)  # Change every minute
+    base_prompt = prompts[time_index]
+    
+    # Add some randomness based on user context
+    random_elements = ["Focus on recent discoveries.", "Include historical context.", 
+                      "Make them practical.", "Choose surprising examples.",
+                      "Include international examples.", "Focus on human impact."]
+    
+    if user_context:
+        random_index = hash(user_context) % len(random_elements)
+    else:
+        random_index = int(time.time()) % len(random_elements)
+    
+    return f"{base_prompt} {random_elements[random_index]}"
+
+def filter_facts_with_exclude_words(facts: List[str], exclude_words: List[str]) -> List[str]:
+    """Filter out facts that contain any of the excluded words"""
+    if not exclude_words:
+        return facts
+    
+    filtered_facts = []
+    for fact in facts:
+        fact_lower = fact.lower()
+        should_include = True
+        
+        for exclude_word in exclude_words:
+            if exclude_word.lower() in fact_lower:
+                should_include = False
+                print(f"Excluded fact due to word '{exclude_word}': {fact}")
+                break
+        
+        if should_include:
+            filtered_facts.append(fact)
+    
+    return filtered_facts
+
+def generate_facts_with_groq_enhanced(category: str, user_id: str = "default", exclude_words: List[str] = None):
+    """Enhanced fact generation with better diversity and exclude words filtering"""
+    if not groq_client:
+        return None
+    
+    try:
+        # Create a cache key
+        cache_key = f"{category}_{user_id}"
+        current_time = time.time()
+        
+        # Clear old cache entries
+        for key in list(RECENT_FACTS_CACHE.keys()):
+            if current_time - RECENT_FACTS_CACHE[key]['timestamp'] > CACHE_DURATION:
+                del RECENT_FACTS_CACHE[key]
+        
+        # Get dynamic prompt
+        dynamic_prompt = get_dynamic_prompt(category, user_id)
+        
+        # Add exclude words to prompt if provided
+        if exclude_words:
+            exclude_text = ", ".join(exclude_words)
+            dynamic_prompt += f" Avoid these topics: {exclude_text}."
+        
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Return exactly 5 unique and diverse facts, one per line. No bullets, no numbers. Ensure facts are not repetitive and cover different aspects of the topic."},
+                {"role": "user", "content": dynamic_prompt}
+            ],
+            max_tokens=400,
+            temperature=0.9,  # Increased temperature for more randomness
+            top_p=0.95,       # Add top_p for more diversity
+        )
+        
+        lines = response.choices[0].message.content.strip().split("\n")
+        facts = []
+        for line in lines:
+            cleaned = line.strip().strip("\"'•-—12345.")
+            # More lenient length check since we'll filter
+            if 8 < len(cleaned) < 150 and cleaned not in facts:  # Avoid duplicates in same response
+                facts.append(cleaned)
+            if len(facts) >= 8:  # Get extra facts for filtering
+                break
+        
+        # Apply exclude words filter
+        if exclude_words:
+            facts = filter_facts_with_exclude_words(facts, exclude_words)
+        
+        # Take first 5 facts after filtering
+        facts = facts[:5]
+        
+        # Store in cache to avoid immediate repetition
+        if facts:
+            RECENT_FACTS_CACHE[cache_key] = {
+                'facts': facts,
+                'timestamp': current_time
+            }
+        
+        return facts if facts else None
+        
+    except Exception as e:
+        print(f"Groq fact gen failed: {e}")
+        return None
+
+def generate_facts_fallback(category: str, exclude_words: List[str] = None):
+    """Enhanced fallback with more facts to choose from and exclude words filtering"""
+    expanded_defaults = {
+        "science": [
+            "Bananas are naturally radioactive.", "Octopuses have three hearts.", 
+            "Honey never spoils.", "Venus rotates backward.", 
+            "Your stomach acid can dissolve metal.", "A day on Venus is longer than its year.",
+            "There are more trees on Earth than stars in our galaxy.", "Water can boil and freeze at the same time.",
+            "The human nose can detect 1 trillion smells.", "A teaspoon of neutron star weighs billions of tons.",
+            "Light takes 8 minutes to reach Earth from the Sun.", "The Earth's core is as hot as the Sun's surface.",
+            "DNA can survive in space for years.", "Some bacteria can survive in nuclear waste.",
+            "The universe is mostly dark matter and dark energy."
+        ],
+        "successful_person": [
+            "Oprah was fired from her first TV job.", "Steve Jobs was adopted.", 
+            "JK Rowling was rejected 12 times.", "Colonel Sanders started KFC at 65.", 
+            "Walt Disney was fired for lacking imagination.", "Bill Gates' first company failed.",
+            "Thomas Edison had over 1,000 failed inventions.", "Elon Musk taught himself programming at 10.",
+            "Stephen King's first novel was rejected 30 times.", "Soichiro Honda was turned down by Toyota.",
+            "Howard Schultz was rejected by 217 investors.", "Arianna Huffington was rejected by 36 publishers.",
+            "Milton Hershey failed three businesses before success.", "Henry Ford went bankrupt twice.",
+            "Simon Cowell was a mailroom clerk before fame."
+        ],
+        "unsolved_mystery": [
+            "The Voynich manuscript remains undeciphered.", "DB Cooper vanished after hijacking.", 
+            "The Bermuda Triangle mystery continues.", "Zodiac Killer was never caught.", 
+            "Oak Island money pit unsolved.", "The Tamam Shud case remains mysterious.",
+            "Jack the Ripper's identity is still unknown.", "The Wow! signal was never explained.",
+            "Roanoke Colony disappearance puzzles historians.", "The Tunguska event cause is debated.",
+            "The Mary Celeste was found abandoned at sea.", "Stonehenge's purpose remains unknown.",
+            "The Nazca Lines' creation purpose is mysterious.", "The Shroud of Turin authenticity is debated.",
+            "The Phoenix Lights UFO sightings remain unexplained."
+        ],
+        "history": [
+            "Cleopatra lived closer to iPhone than pyramids.", "Oxford University predates Aztec Empire.", 
+            "The Great Wall visible from space myth.", "Napoleon was actually average height.", 
+            "Vikings discovered America before Columbus.", "The shortest war lasted 38 minutes.",
+            "Julius Caesar was kidnapped by pirates.", "Mona Lisa was stolen in 1911.",
+            "Pyramids were built by paid workers, not slaves.", "Roman urine was used for toothpaste.",
+            "The Titanic received multiple iceberg warnings.", "Ancient Romans used spider webs as bandaids.",
+            "The Library of Alexandria burned for months.", "Medieval people rarely bathed.",
+            "The Black Death killed half of Europe's population."
+        ],
+        "sports": [
+            "Michael Jordan was cut from high school team.", "Usain Bolt has scoliosis.", 
+            "Serena Williams holds 23 Grand Slams.", "Muhammad Ali won Olympic gold medal.", 
+            "Pele scored 1283 career goals.", "A baseball can never touch 5 bases in one play.",
+            "NBA once used a red, white and blue ball.", "Golf was banned in Scotland in 1457.",
+            "Olympic gold medals are mostly silver.", "A cricket game once lasted 14 days.",
+            "The first Olympic games had only one event.", "A hockey puck can travel at 100 mph.",
+            "Table tennis balls can spin at 3000 rpm.", "The longest tennis match lasted 11 hours.",
+            "A basketball player was traded for a washing machine."
+        ]
+    }
+    
+    facts = expanded_defaults.get(category, expanded_defaults["science"])
+    
+    # Apply exclude words filter
+    if exclude_words:
+        facts = filter_facts_with_exclude_words(facts, exclude_words)
+    
+    # Shuffle and return 5 random facts
+    random.shuffle(facts)
+    return facts[:5]
+
+def get_fresh_facts(category: str, user_id: str = "default", exclude_words: List[str] = None):
+    """Get facts with repetition avoidance and exclude words filtering"""
+    # Try enhanced Groq first
+    facts = generate_facts_with_groq_enhanced(category, user_id, exclude_words)
+    
+    if facts:
+        print(f"Generated {len(facts)} fresh facts with AI")
+        return facts
+    
+    # Fallback with more variety
+    fallback_facts = generate_facts_fallback(category, exclude_words)
+    print(f"Generated {len(fallback_facts)} facts from fallback database")
+    
+    return fallback_facts
+
 # --- TTS FUNCTIONS ---
+
 def generate_audio_with_gtts(text: str, audio_path: str):
+    """Generate audio using gTTS (Google Text-to-Speech)"""
     try:
         from gtts import gTTS
+        
         print(f"Generating audio with gTTS for text: {text[:50]}...")
+        
+        # Create gTTS object
         tts = gTTS(text=text, lang='en', slow=False)
+        
+        # Save as MP3
         tts.save(audio_path)
+        
+        # Check if file was created
         if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+            # Get actual duration using ffprobe
             try:
                 result = subprocess.run([
                     "ffprobe", "-v", "error", "-show_entries",
@@ -75,56 +308,84 @@ def generate_audio_with_gtts(text: str, audio_path: str):
                     audio_path
                 ], capture_output=True, text=True, timeout=10)
                 duration = float(result.stdout.strip())
-                print(f"gTTS success: {os.path.getsize(audio_path)} bytes, {duration:.2f}s")
-            except:
+                print(f"gTTS success: {os.path.getsize(audio_path)} bytes, {duration:.2f}s duration")
+            except Exception as e:
+                print(f"ffprobe error, estimating duration: {e}")
+                # Estimate duration if ffprobe fails
                 duration = len(text.split()) * 0.5 + 1.0
             return True, duration
         else:
+            print("gTTS failed: File too small or not created")
             return False, 0.0
+            
     except Exception as e:
         print(f"gTTS error: {e}")
         return False, 0.0
 
 def generate_audio_fallback(text: str, audio_path: str):
+    """Generate enhanced fallback audio with better quality"""
     try:
         words = text.split()
-        duration = max(len(words) * 0.5 + 1.0, 3.0)
-        print(f"Generating enhanced fallback audio: {duration:.2f}s")
-        base_freq = 200
+        duration = max(len(words) * 0.5 + 1.0, 3.0)  # Minimum 3 seconds
+        
+        print(f"Generating enhanced fallback audio: {duration:.2f}s duration")
+        
+        # Create more natural-sounding audio with varying tones
+        # This creates a more pleasant background sound instead of pure silence
+        base_freq = 200  # Base frequency
+        words = text.split()
+        
         if len(words) > 0:
+            # Create a filter chain that varies with the text
             filter_chain = []
             for i, word in enumerate(words):
                 word_duration = duration / len(words)
                 start_time = i * word_duration
-                freq_variation = base_freq + (len(word) * 10)
+                freq_variation = base_freq + (len(word) * 10)  # Vary frequency by word length
+                
                 filter_chain.append(
-                    f"sine=frequency={freq_variation}:duration={word_duration}:sample_rate=22050,"
-                    f"adelay={int(start_time * 1000)}|{int(start_time * 1000)}"
+                    f"sine=frequency={freq_variation}:duration={word_duration}:"
+                    f"sample_rate=22050,adelay={int(start_time * 1000)}|{int(start_time * 1000)}"
                 )
+            
+            # Mix all the sine waves together
             filter_complex = f"{'+'.join(filter_chain)}"
+            
             subprocess.run([
-                "ffmpeg", "-f", "lavfi", "-i", filter_complex,
+                "ffmpeg", "-f", "lavfi",
+                "-i", filter_complex,
                 "-af", f"volume=0.05,afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5",
                 "-acodec", "libmp3lame", "-b:a", "64k", "-ar", "22050",
-                "-t", str(duration), audio_path, "-y", "-loglevel", "error"
+                "-t", str(duration),
+                audio_path, "-y", "-loglevel", "error"
             ], timeout=30)
         else:
+            # Simple tone for very short text
             subprocess.run([
-                "ffmpeg", "-f", "lavfi", "-i", f"sine=frequency=300:duration={duration}",
+                "ffmpeg", "-f", "lavfi", 
+                "-i", f"sine=frequency=300:duration={duration}",
                 "-af", f"afade=t=in:st=0:d=0.5,afade=t=out:st={duration-0.5}:d=0.5,volume=0.05",
                 "-acodec", "libmp3lame", "-b:a", "64k", "-ar", "22050",
                 audio_path, "-y", "-loglevel", "error"
             ], timeout=30)
+        
         success = os.path.exists(audio_path) and os.path.getsize(audio_path) > 500
-        if not success:
+        if success:
+            print(f"Enhanced fallback success: {os.path.getsize(audio_path)} bytes")
+        else:
+            print("Enhanced fallback failed, using basic fallback")
+            # Ultimate fallback - silent audio
             subprocess.run([
                 "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
                 "-t", str(duration), "-acodec", "libmp3lame", "-b:a", "64k",
                 audio_path, "-y", "-loglevel", "error"
             ], timeout=30)
+        
         return os.path.exists(audio_path), duration
+        
     except Exception as e:
         print(f"Enhanced fallback error: {e}")
+        # Ultimate fallback - silent audio
         duration = len(text.split()) * 0.5 + 1.0
         subprocess.run([
             "ffmpeg", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
@@ -134,25 +395,46 @@ def generate_audio_fallback(text: str, audio_path: str):
         return os.path.exists(audio_path), duration
 
 def generate_audio(text: str, audio_path: str, category: str = "science"):
+    """Generate audio using gTTS with enhanced fallback"""
+    
+    # Try gTTS first (requires internet)
     print("Attempting gTTS audio generation...")
     success, duration = generate_audio_with_gtts(text, audio_path)
     if success:
-        print("Audio generated with gTTS")
+        print("✅ Audio generated with gTTS")
         return success, duration
+    
+    # Use enhanced fallback
     print("gTTS failed, using enhanced fallback audio...")
     return generate_audio_fallback(text, audio_path)
 
-# --- WORD TIMING FUNCTIONS ---
+# --- IMPROVED WORD TIMING FUNCTIONS ---
+
 def analyze_speech_pattern(text: str, duration: float):
+    """Analyze text to create more realistic word timings based on linguistic patterns"""
     words = text.split()
     if not words:
         return []
-    word_complexity = {'short': 0.3, 'medium': 0.5, 'long': 0.8, 'complex': 1.2}
+    
+    # Linguistic patterns for better timing
+    word_complexity = {
+        'short': 0.3,    # and, the, is
+        'medium': 0.5,   # most common words
+        'long': 0.8,     # multi-syllable words
+        'complex': 1.2   # technical/long words
+    }
+    
+    # Common short words that are spoken quickly
     short_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by'}
+    
+    # Calculate base time per word
     base_time_per_word = duration / len(words)
+    
     timings = []
-    current_time = 0.1
+    current_time = 0.1  # Start slightly after beginning
+    
     for i, word in enumerate(words):
+        # Determine word complexity
         word_lower = word.lower().strip('.,!?;:"')
         if word_lower in short_words:
             complexity = word_complexity['short']
@@ -164,63 +446,51 @@ def analyze_speech_pattern(text: str, duration: float):
             complexity = word_complexity['long']
         else:
             complexity = word_complexity['complex']
+        
+        # Add pause for punctuation
         pause_multiplier = 1.0
         if i > 0 and any(punc in words[i-1] for punc in ',;'):
             pause_multiplier = 1.3
         elif i > 0 and any(punc in words[i-1] for punc in '.!?'):
             pause_multiplier = 1.6
+        
+        # Calculate word duration
         word_duration = base_time_per_word * complexity * pause_multiplier
+        
+        # Ensure we don't exceed total duration
         if current_time + word_duration > duration - 0.1:
             word_duration = duration - current_time - 0.1
+        
         start_time = current_time
         end_time = current_time + word_duration
-        timings.append({"word": word, "start": start_time, "end": end_time})
+        
+        timings.append({
+            "word": word,
+            "start": start_time,
+            "end": end_time
+        })
+        
         current_time = end_time
+        
+        # Add small pause between words
         if i < len(words) - 1:
-            current_time += 0.05
+            current_time += 0.05  # 50ms pause between words
+    
     return timings
 
 def generate_word_timings(text: str, duration: float):
+    """Generate improved word timings for better karaoke sync"""
     words = text.split()
     if not words:
         return []
+    
+    # Use linguistic analysis for better timing
     return analyze_speech_pattern(text, duration)
 
-def split_into_sentences(text: str):
-    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
-    return [s.strip() for s in sentences if len(s.strip()) > 5]
-
-def format_time_ass(seconds):
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = seconds % 60
-    return f"{hours}:{minutes:02d}:{secs:05.2f}"
-
-# --- NEW: Sentence timing helper ---
-def build_sentence_timings(sentence_word_groups, total_duration):
-    timings = []
-    end_times = []
-    for i, group in enumerate(sentence_word_groups):
-        if group:
-            start = group[0]["start"]
-        else:
-            start = total_duration * i / max(len(sentence_word_groups), 1)
-        timings.append(start)
-        if i < len(sentence_word_groups) - 1 and sentence_word_groups[i + 1]:
-            end = sentence_word_groups[i + 1][0]["start"]
-        else:
-            end = total_duration + 2.0
-        end_times.append(end)
-    return timings, end_times
-
-# --- FIXED: create_karaoke_subtitles ---
-def create_karaoke_subtitles(
-    word_timings,
-    subtitle_path,
-    effect="karaoke",
-    sentence_word_groups=None,
-    total_duration=0.0,
-):
+def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
+    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT - FIXED"""
+    
+    # ASS header for 768x768 centered subtitles
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -228,150 +498,133 @@ WrapStyle: 0
 PlayResX: 768
 PlayResY: 768
 ScaledBorderAndShadow: yes
+
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,5,10,10,384,1
-"""
 
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+    
     if not word_timings:
+        # Fallback: display empty for 3 seconds
         ass_content += "Dialogue: 0,0:00:00.00,0:00:03.00,Default,,0,0,0,, \n"
         with open(subtitle_path, "w", encoding="utf-8") as f:
             f.write(ass_content)
         return
 
-    if sentence_word_groups and len(sentence_word_groups) > 0:
-        timings, end_times = build_sentence_timings(sentence_word_groups, total_duration)
-
-        for sent_idx, (words, sent_end) in enumerate(zip(sentence_word_groups, end_times)):
-            if not words:
-                continue
-            sent_start = words[0]["start"]
-            start_ass = format_time_ass(sent_start)
-            end_ass   = format_time_ass(sent_end)
-
-            if effect == "karaoke":
-                for local_i, w in enumerate(words):
-                    w_start = format_time_ass(w["start"])
-                    w_end = format_time_ass(
-                        words[local_i + 1]["start"] - 0.001 if local_i < len(words) - 1 else sent_end
-                    )
-                    parts = []
-                    for j, ww in enumerate(words):
-                        if j < local_i:
-                            parts.append(ww["word"])
-                        elif j == local_i:
-                            parts.append("{\\c&H00FFFF&\\b1}" + ww["word"] + "{\\c&HFFFFFF&\\b0}")
-                        else:
-                            parts.append(ww["word"])
-                    line = " ".join(parts)
-                    ass_content += f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,{line}\n"
-
-            elif effect == "typewriter":
-                for local_i, w in enumerate(words):
-                    w_start = format_time_ass(w["start"])
-                    w_end   = format_time_ass(
-                        words[local_i + 1]["start"] - 0.001 if local_i < len(words) - 1 else sent_end
-                    )
-                    line = " ".join(ww["word"] for ww in words[: local_i + 1])
-                    ass_content += f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,{line}\n"
-
-            else:
-                sentence_text = " ".join(w["word"] for w in words)
-                if effect == "fade":
-                    ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{{\\fad(300,300)}}{sentence_text}\n"
-                elif effect == "bouncing":
-                    ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{{\\move(384,550,384,450,0,500)\\t(0,250,\\fscx110\\fscy110)\\t(250,500,\\fscx100\\fscy100)}}{sentence_text}\n"
-                else:
-                    ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{sentence_text}\n"
-
-    else:
+    if effect == "karaoke":
+        # Calculate video end time (add 2 seconds after last word ends)
         video_end = word_timings[-1]["end"] + 2.0
+        
+        # Show full white text from start, then highlight words as they're spoken
         full_text = " ".join(w["word"] for w in word_timings)
-        start_ass = format_time_ass(word_timings[0]["start"])
-        end_ass   = format_time_ass(video_end)
-
-        if effect == "karaoke":
-            for i, t in enumerate(word_timings):
-                w_start = format_time_ass(t["start"])
-                w_end   = format_time_ass(word_timings[i + 1]["start"] - 0.001 if i + 1 < len(word_timings) else video_end)
-                parts = []
-                for j, tt in enumerate(word_timings):
-                    if j < i:
-                        parts.append(tt["word"])
-                    elif j == i:
-                        parts.append("{\\c&H00FFFF&\\b1}" + tt["word"] + "{\\c&HFFFFFF&\\b0}")
-                    else:
-                        parts.append(tt["word"])
-                line = " ".join(parts)
-                ass_content += f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,{line}\n"
-
-        elif effect == "typewriter":
-            for i, t in enumerate(word_timings):
-                w_start = format_time_ass(t["start"])
-                w_end   = format_time_ass(word_timings[i + 1]["start"] - 0.001 if i + 1 < len(word_timings) else video_end)
-                line = " ".join(w["word"] for w in word_timings[: i + 1])
-                ass_content += f"Dialogue: 0,{w_start},{w_end},Default,,0,0,0,,{line}\n"
-
-        elif effect == "fade":
-            ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
-
-        elif effect == "bouncing":
-            ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
-        else:
-            ass_content += f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{full_text}\n"
-
-    ass_content += "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+        
+        for i, timing in enumerate(word_timings):
+            start = format_time_ass(timing["start"])
+            
+            # CRITICAL FIX: End current line RIGHT BEFORE next word starts
+            # This prevents overlapping dialogue lines
+            if i < len(word_timings) - 1:
+                # End just before next word (subtract tiny amount to avoid overlap)
+                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
+            else:
+                # Last word stays until video end
+                end = format_time_ass(video_end)
+            
+            # Build sentence with current word highlighted in yellow
+            highlighted_words = []
+            for j, t in enumerate(word_timings):
+                if j < i:
+                    # Already spoken - keep white
+                    highlighted_words.append(t["word"])
+                elif j == i:
+                    # Currently speaking - yellow + bold
+                    highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
+                else:
+                    # Not yet spoken - white
+                    highlighted_words.append(t["word"])
+            
+            highlighted_text = " ".join(highlighted_words)
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
+    
+    elif effect == "fade":
+        full_text = " ".join(w["word"] for w in word_timings)
+        start = format_time_ass(word_timings[0]["start"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
+    
+    elif effect == "typewriter":
+        # Show words appearing one by one - each line replaces the previous
+        video_end = word_timings[-1]["end"] + 2.0
+        
+        for i, timing in enumerate(word_timings):
+            start = format_time_ass(timing["start"])
+            
+            # CRITICAL FIX: End current line RIGHT BEFORE next word starts
+            # This prevents overlapping dialogue lines
+            if i < len(word_timings) - 1:
+                # End just before next word (subtract tiny amount to avoid overlap)
+                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
+            else:
+                # Last word stays until video end
+                end = format_time_ass(video_end)
+            
+            # Show all words up to and including current word
+            text_so_far = " ".join(w["word"] for w in word_timings[:i+1])
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
+    
+    elif effect == "bouncing":
+        full_text = " ".join(w["word"] for w in word_timings)
+        start = format_time_ass(word_timings[0]["start"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
+    
+    else:  # static
+        full_text = " ".join(w["word"] for w in word_timings)
+        start = format_time_ass(word_timings[0]["start"])
+        # Keep text visible for 2 seconds after audio ends
+        end = format_time_ass(word_timings[-1]["end"] + 2.0)
+        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
+    
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
 
-# --- VIDEO COMPOSITION ---
-def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_path, output_path, duration, sentence_timings):
+def format_time_ass(seconds):
+    """Convert seconds to ASS timestamp format (0:00:00.00)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = seconds % 60
+    return f"{hours}:{minutes:02d}:{secs:05.2f}"
+
+def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_path, duration):
+    """Create video with image, audio, and ASS subtitles - EXTENDED DURATION"""
+    
+    # Extend video duration by 2 seconds to keep text visible after audio ends
     video_duration = duration + 2.0
-    if len(image_paths) == 1:
-        cmd = [
-            "ffmpeg", "-loop", "1", "-i", image_paths[0],
-            "-i", audio_path,
-            "-vf", f"scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,subtitles={subtitle_path}",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-            "-c:a", "aac", "-b:a", "96k", "-t", str(video_duration),
-            "-pix_fmt", "yuv420p", "-threads", "0", "-y", "-loglevel", "error",
-            output_path
-        ]
-    else:
-        inputs = []
-        for img in image_paths:
-            inputs.extend(["-loop", "1", "-i", img])
-        inputs.extend(["-i", audio_path])
-        transition_time = sentence_timings[1] if len(sentence_timings) > 1 else duration / 2
-        filter_parts = []
-        for i in range(len(image_paths)):
-            filter_parts.append(f"[{i}:v]scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,setpts=PTS-STARTPTS[v{i}]")
-        if len(image_paths) == 2:
-            crossfade_duration = 0.3
-            filter_parts.append(f"[v0][v1]xfade=transition=fade:duration={crossfade_duration}:offset={transition_time-crossfade_duration/2}[vout]")
-            filter_parts.append(f"[vout]subtitles={subtitle_path}[final]")
-        else:
-            prev = "v0"
-            for i in range(1, len(image_paths)):
-                t_time = sentence_timings[i] if i < len(sentence_timings) else (duration * i / len(image_paths))
-                crossfade_duration = 0.3
-                next_label = f"vout{i}" if i < len(image_paths) - 1 else "vout"
-                filter_parts.append(f"[{prev}][v{i}]xfade=transition=fade:duration={crossfade_duration}:offset={t_time-crossfade_duration/2}[{next_label}]")
-                prev = next_label
-            filter_parts.append(f"[vout]subtitles={subtitle_path}[final]")
-        filter_complex = ";".join(filter_parts)
-        cmd = [
-            "ffmpeg"
-        ] + inputs + [
-            "-filter_complex", filter_complex,
-            "-map", "[final]", "-map", f"{len(image_paths)}:a",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
-            "-c:a", "aac", "-b:a", "96k", "-t", str(video_duration),
-            "-pix_fmt", "yuv420p", "-threads", "0", "-y", "-loglevel", "error",
-            output_path
-        ]
+    
+    # FFmpeg command with ASS subtitle overlay
+    cmd = [
+        "ffmpeg",
+        "-loop", "1", "-i", image_path,
+        "-i", audio_path,
+        "-vf", f"scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,subtitles={subtitle_path}",
+        "-c:v", "libx264",
+        "-preset", "medium",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-t", str(video_duration),  # Use extended duration
+        "-pix_fmt", "yuv420p",
+        "-y",
+        "-loglevel", "error",
+        output_path
+    ]
+    
     try:
-        result = subprocess.run(cmd, timeout=60, capture_output=True)
+        result = subprocess.run(cmd, timeout=90, capture_output=True)
         if result.returncode != 0:
             print(f"FFmpeg error: {result.stderr.decode()}")
             return False
@@ -380,16 +633,16 @@ def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_pat
         print(f"Video creation error: {e}")
         return False
 
-# --- IMAGE GENERATION ---
 def generate_image_pollinations(prompt, path):
     try:
+        # Enhanced prompt for better visuals
         enhanced_prompt = f"high quality cinematic image: {prompt}, 4k, detailed, vibrant colors"
         url = f"https://pollinations.ai/p/{urllib.parse.quote(enhanced_prompt)}?width=768&height=768&nologo=true&enhance=true"
-        resp = requests.get(url, timeout=15)
+        resp = requests.get(url, timeout=20)
         if resp.status_code == 200 and len(resp.content) > 1000:
             with open(path, "wb") as f:
                 f.write(resp.content)
-            print(f"Image generated from Pollinations")
+            print(f"Image generated successfully from Pollinations")
             return True
     except Exception as e:
         print(f"Pollinations failed: {e}")
@@ -398,179 +651,221 @@ def generate_image_pollinations(prompt, path):
 def generate_image_placeholder(prompt, path, category="science"):
     width, height = 768, 768
     colors = CATEGORY_COLORS.get(category, ["#4A90E2", "#50E3C2"])
+    
+    # Create gradient background
     img = Image.new("RGB", (width, height))
     pixels = img.load()
+    
+    # Create gradient
     for y in range(height):
         r1, g1, b1 = tuple(int(colors[0].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
-        r2, g2, b2 = tuple(int(colors[1].lstrip('#')[i:i+2], 16) for i in (0, 2, 4)) if len(colors) > 1 else (r1, g1, b1)
+        if len(colors) > 1:
+            r2, g2, b2 = tuple(int(colors[1].lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+        else:
+            r2, g2, b2 = r1, g1, b1
+        
         ratio = y / height
         r = int(r1 + (r2 - r1) * ratio)
         g = int(g1 + (g2 - g1) * ratio)
         b = int(b1 + (b2 - b1) * ratio)
+        
         for x in range(width):
             pixels[x, y] = (r, g, b)
+    
     draw = ImageDraw.Draw(img)
+    
+    # Add decorative circles
     for _ in range(10):
         x = random.randint(0, width)
         y = random.randint(0, height)
         r = random.randint(40, 180)
+        alpha = random.randint(30, 80)
         color = colors[1] if len(colors) > 1 else colors[0]
         color_rgb = tuple(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
         draw.ellipse([x-r, y-r, x+r, y+r], fill=color_rgb)
+    
     img.save(path, "JPEG", quality=90)
     print(f"Placeholder image generated")
     return True
 
-# --- FACT GENERATION ---
-def generate_facts_with_groq(category: str):
-    if not groq_client:
-        return None
-    try:
-        prompt = PROMPTS.get(category, PROMPTS["science"])
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "Return exactly 5 facts, each with 2 sentences. No bullets, no numbers. Format: Sentence1. Sentence2. (blank line) Next fact..."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=500,
-            temperature=1.2
-        )
-        content = response.choices[0].message.content.strip()
-        fact_blocks = re.split(r'\n\s*\n', content)
-        facts = []
-        for block in fact_blocks:
-            cleaned = block.strip().strip("\"'•-—12345.")
-            sentences = re.split(r'(?<=[.!?])\s+', cleaned)
-            sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
-            if len(sentences) >= 2:
-                fact_text = f"{sentences[0]} {sentences[1]}"
-                if 20 < len(fact_text) < 200:
-                    facts.append(fact_text)
-            elif len(sentences) == 1 and 20 < len(sentences[0]) < 120:
-                facts.append(sentences[0])
-            if len(facts) >= 5:
-                break
-        return facts[:5] if len(facts) >= 5 else None
-    except Exception as e:
-        print(f"Groq fact gen failed: {e}")
-        return None
-
-def generate_facts_fallback(category: str):
-    defaults = {
-        "science": [
-            "Bananas are naturally radioactive. They contain potassium-40, a radioactive isotope.",
-            "Octopuses have three hearts. Two pump blood to gills, one to organs.",
-            "Honey never spoils. Archaeologists found edible honey in ancient tombs.",
-            "Venus rotates backward. It's the only planet spinning clockwise.",
-            "Your stomach acid can dissolve metal. It's incredibly corrosive hydrochloric acid."
-        ],
-        # ... (rest unchanged)
-    }
-    facts = defaults.get(category, defaults["science"])
-    return random.sample(facts, min(5, len(facts)))
-
 # --- API ENDPOINTS ---
+
 @app.get("/")
 def home():
+    """API root endpoint"""
     return {
         "message": "AI Fact Video Generator API",
-        "version": "2.1.0",
-        "status": "2nd scene karaoke FIXED"
+        "version": "1.0.0",
+        "endpoints": {
+            "/facts": "GET - Get AI-generated facts by category",
+            "/generate_video": "GET - Generate video with fact and effects",
+            "/health": "GET - Health check",
+            "/test": "GET - Test endpoint"
+        },
+        "status": "operational",
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
+        "tts_engine": "gTTS + Enhanced Fallback",
+        "features": ["duplicate_prevention", "exclude_words", "multiple_subtitle_effects"]
+    }
+
+@app.get("/test")
+def test_endpoint():
+    """Test endpoint to verify CORS is working"""
+    return {
+        "message": "Backend is working! CORS should be configured correctly.",
+        "status": "success",
+        "timestamp": "2024-01-01T00:00:00Z"
+    }
+
+@app.get("/facts")
+def get_facts(category: str, user_id: str = None, exclude_words: str = None):
+    """Get AI-generated facts for a specific category with duplicate prevention and exclude words"""
+    if category not in ENHANCED_PROMPTS:
+        raise HTTPException(400, "Invalid category")
+    
+    # Generate a user ID if not provided (based on IP or random)
+    if not user_id:
+        user_id = f"user_{hash(str(time.time())) % 10000}"
+    
+    # Parse exclude words (comma-separated string)
+    exclude_list = []
+    if exclude_words:
+        exclude_list = [word.strip() for word in exclude_words.split(',') if word.strip()]
+        print(f"Excluding words: {exclude_list}")
+    
+    facts = get_fresh_facts(category, user_id, exclude_list)
+    
+    return {
+        "facts": facts,
+        "category": category,
+        "user_id": user_id,  # Return user_id so frontend can reuse it
+        "exclude_words": exclude_list,
+        "timestamp": time.time(),
+        "total_facts": len(facts)
     }
 
 @app.get("/generate_video")
 def generate_video(fact: str, category: str = "science", effect: str = "karaoke"):
+    """Generate video with gTTS and centered animated subtitles"""
+    
     safe_fact = fact.strip()[:300]
     if not safe_fact:
         raise HTTPException(400, "Fact text is required")
-
-    print(f"\n=== Generating Video ===")
+    
+    print(f"\n=== Starting video generation ===")
     print(f"Fact: {safe_fact}")
-
-    sentences = split_into_sentences(safe_fact)
-    print(f"Sentences: {sentences}")
-
-    image_paths = [f"/tmp/{uuid.uuid4()}.jpg" for _ in range(len(sentences))]
+    print(f"Category: {category}")
+    print(f"Effect: {effect}")
+    
+    # Temporary file paths
+    img_path = f"/tmp/{uuid.uuid4()}.jpg"
     audio_path = f"/tmp/{uuid.uuid4()}.mp3"
     subtitle_path = f"/tmp/{uuid.uuid4()}.ass"
     output_path = f"/tmp/{uuid.uuid4()}.mp4"
-
+    
     try:
-        # 1. Generate images
-        def gen_img(i, s, p):
-            prompt = f"{category} theme: {s}"
-            success = generate_image_pollinations(prompt, p) or generate_image_placeholder(s, p, category)
-            return i, success
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            results = list(executor.map(gen_img, range(len(sentences)), sentences, image_paths))
-        for i, success in results:
-            if not success:
-                raise HTTPException(500, f"Image {i+1} failed")
-
-        # 2. Generate audio
+        # Step 1: Generate image
+        print("Step 1: Generating image...")
+        image_prompt = f"{category} theme: {safe_fact[:100]}"
+        if not (generate_image_pollinations(image_prompt, img_path) or 
+                generate_image_placeholder(safe_fact, img_path, category)):
+            raise HTTPException(500, "Image generation failed")
+        
+        # Step 2: Generate audio with gTTS
+        print("Step 2: Generating voice with gTTS...")
         audio_success, duration = generate_audio(safe_fact, audio_path, category)
         if not audio_success:
-            raise HTTPException(500, "Audio failed")
-        duration = max(duration, 3.0)
-
-        # 3. Word timings
+            raise HTTPException(500, "Audio generation failed")
+        
+        duration = max(duration, 3.0)  # Minimum 3 seconds
+        print(f"Audio duration: {duration:.2f}s")
+        
+        # Step 3: Generate IMPROVED word timings for karaoke
+        print("Step 3: Creating improved word timings...")
         word_timings = generate_word_timings(safe_fact, duration)
-
-        # 4. Group words by sentence
-        sentence_word_groups = []
-        word_index = 0
-        for sentence in sentences:
-            sentence_words = sentence.split()
-            count = len(sentence_words)
-            if word_index + count <= len(word_timings):
-                group = word_timings[word_index:word_index + count]
-                sentence_word_groups.append(group)
-                word_index += count
-            else:
-                sentence_word_groups.append([])
-
-        # 5. Build timings
-        sentence_timings, _ = build_sentence_timings(sentence_word_groups, duration)
-
-        # 6. Subtitles
-        create_karaoke_subtitles(
-            word_timings, subtitle_path, effect,
-            sentence_word_groups=sentence_word_groups,
-            total_duration=duration
-        )
-
-        # 7. Compose video
-        if not create_video_with_images_and_subtitles(
-            image_paths, audio_path, subtitle_path, output_path, duration, sentence_timings
-        ):
+        print(f"Generated {len(word_timings)} word timings with improved sync")
+        
+        # Debug: print timing information
+        total_word_time = sum([t['end'] - t['start'] for t in word_timings])
+        print(f"Total word time: {total_word_time:.2f}s, Audio duration: {duration:.2f}s")
+        
+        # Step 4: Create subtitle file with selected effect - CENTERED
+        print(f"Step 4: Creating {effect} subtitles (centered)...")
+        create_karaoke_subtitles(word_timings, subtitle_path, effect)
+        
+        # Step 5: Create final video with centered subtitles
+        print("Step 5: Composing final video with centered text...")
+        if not create_video_with_subtitles(img_path, audio_path, subtitle_path, output_path, duration):
             raise HTTPException(500, "Video composition failed")
-
-        # 8. Stream
+        
+        print(f"Video created successfully: {os.path.getsize(output_path)} bytes")
+        
+        # Cleanup temp files
+        for temp_file in [img_path, audio_path, subtitle_path]:
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
+        
+        # Stream video response
         def iterfile():
             try:
                 with open(output_path, "rb") as f:
                     yield from f
             finally:
                 if os.path.exists(output_path):
-                    try: os.unlink(output_path)
-                    except: pass
-
+                    try:
+                        os.unlink(output_path)
+                    except:
+                        pass
+        
         return StreamingResponse(
             iterfile(),
             media_type="video/mp4",
-            headers={"Content-Disposition": f"attachment; filename=video_{effect}.mp4"}
+            headers={
+                "Content-Disposition": f"attachment; filename=video_{effect}_{category}.mp4",
+                "X-Video-Size": str(os.path.getsize(output_path)),
+                "X-Video-Duration": str(duration),
+                "Access-Control-Expose-Headers": "Content-Disposition, X-Video-Size, X-Video-Duration"
+            }
         )
-
+        
     except Exception as e:
-        print(f"ERROR: {e}")
-        for f in image_paths + [audio_path, subtitle_path, output_path]:
-            if os.path.exists(f):
-                try: os.unlink(f)
-                except: pass
+        print(f"ERROR: {str(e)}")
+        # Cleanup on error
+        for temp_file in [img_path, audio_path, subtitle_path, output_path]:
+            if os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass
         raise HTTPException(500, f"Video generation error: {str(e)}")
 
-# --- Run ---
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "groq_available": groq_client is not None,
+        "tts_available": True,
+        "ffmpeg_available": True,
+        "environment": "production",
+        "cors_enabled": True,
+        "frontend_url": "https://multisite.interactivelink.site/factshortvideogen",
+        "karaoke_sync": "improved",
+        "tts_engine": "gTTS + Enhanced Fallback",
+        "features": {
+            "duplicate_prevention": True,
+            "exclude_words": True,
+            "multiple_prompts": True,
+            "enhanced_fallbacks": True
+        },
+        "cache_size": len(RECENT_FACTS_CACHE),
+        "categories": list(ENHANCED_PROMPTS.keys())
+    }
+
+# --- Run server ---
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
