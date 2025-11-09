@@ -239,8 +239,8 @@ def generate_word_timings(text: str, duration: float):
     
     return analyze_speech_pattern(text, duration)
 
-def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke"):
-    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT"""
+def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke", sentence_boundaries=None):
+    """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT - SENTENCE BY SENTENCE"""
     
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
@@ -264,61 +264,168 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f.write(ass_content)
         return
 
-    if effect == "karaoke":
+    # Determine sentence boundaries if provided
+    if sentence_boundaries and len(sentence_boundaries) > 0:
+        # SHOW ONLY CURRENT SENTENCE
         video_end = word_timings[-1]["end"] + 2.0
-        full_text = " ".join(w["word"] for w in word_timings)
         
-        for i, timing in enumerate(word_timings):
-            start = format_time_ass(timing["start"])
+        # Split word timings by sentence
+        sentence_word_groups = []
+        current_sentence_words = []
+        word_idx = 0
+        
+        for word_timing in word_timings:
+            current_sentence_words.append(word_timing)
+            word_idx += 1
             
-            if i < len(word_timings) - 1:
-                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
-            else:
-                end = format_time_ass(video_end)
-            
-            highlighted_words = []
-            for j, t in enumerate(word_timings):
-                if j < i:
-                    highlighted_words.append(t["word"])
-                elif j == i:
-                    highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
+            # Check if this word ends a sentence (has period, exclamation, question mark)
+            if any(punct in word_timing["word"] for punct in '.!?'):
+                sentence_word_groups.append(current_sentence_words)
+                current_sentence_words = []
+        
+        # Add any remaining words
+        if current_sentence_words:
+            sentence_word_groups.append(current_sentence_words)
+        
+        print(f"DEBUG: Split into {len(sentence_word_groups)} sentence groups")
+        
+        # Create subtitles for each sentence separately
+        if effect == "karaoke":
+            for sent_idx, sentence_words in enumerate(sentence_word_groups):
+                if not sentence_words:
+                    continue
+                
+                sentence_start = sentence_words[0]["start"]
+                
+                # Determine when this sentence ends
+                if sent_idx < len(sentence_word_groups) - 1:
+                    # End when next sentence starts
+                    sentence_end = sentence_word_groups[sent_idx + 1][0]["start"]
                 else:
-                    highlighted_words.append(t["word"])
-            
-            highlighted_text = " ".join(highlighted_words)
-            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
-    
-    elif effect == "fade":
-        full_text = " ".join(w["word"] for w in word_timings)
-        start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"] + 2.0)
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
-    
-    elif effect == "typewriter":
-        video_end = word_timings[-1]["end"] + 2.0
+                    # Last sentence - keep visible until video end
+                    sentence_end = video_end
+                
+                # Create karaoke effect for this sentence only
+                for i, timing in enumerate(sentence_words):
+                    start = format_time_ass(timing["start"])
+                    
+                    # End right before next word in THIS sentence
+                    if i < len(sentence_words) - 1:
+                        end = format_time_ass(sentence_words[i + 1]["start"] - 0.001)
+                    else:
+                        # Last word of sentence - keep until sentence ends
+                        end = format_time_ass(sentence_end)
+                    
+                    # Build text with current word highlighted (only words from THIS sentence)
+                    highlighted_words = []
+                    for j, t in enumerate(sentence_words):
+                        if j < i:
+                            highlighted_words.append(t["word"])
+                        elif j == i:
+                            highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
+                        else:
+                            highlighted_words.append(t["word"])
+                    
+                    highlighted_text = " ".join(highlighted_words)
+                    ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
         
-        for i, timing in enumerate(word_timings):
-            start = format_time_ass(timing["start"])
-            
-            if i < len(word_timings) - 1:
-                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
-            else:
-                end = format_time_ass(video_end)
-            
-            text_so_far = " ".join(w["word"] for w in word_timings[:i+1])
-            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
-    
-    elif effect == "bouncing":
-        full_text = " ".join(w["word"] for w in word_timings)
-        start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"] + 2.0)
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
+        elif effect == "typewriter":
+            for sent_idx, sentence_words in enumerate(sentence_word_groups):
+                if not sentence_words:
+                    continue
+                
+                if sent_idx < len(sentence_word_groups) - 1:
+                    sentence_end = sentence_word_groups[sent_idx + 1][0]["start"]
+                else:
+                    sentence_end = video_end
+                
+                for i, timing in enumerate(sentence_words):
+                    start = format_time_ass(timing["start"])
+                    
+                    if i < len(sentence_words) - 1:
+                        end = format_time_ass(sentence_words[i + 1]["start"] - 0.001)
+                    else:
+                        end = format_time_ass(sentence_end)
+                    
+                    text_so_far = " ".join(w["word"] for w in sentence_words[:i+1])
+                    ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
+        
+        else:  # static, fade, bouncing - show sentence at once
+            for sent_idx, sentence_words in enumerate(sentence_word_groups):
+                if not sentence_words:
+                    continue
+                
+                sentence_text = " ".join(w["word"] for w in sentence_words)
+                start = format_time_ass(sentence_words[0]["start"])
+                
+                if sent_idx < len(sentence_word_groups) - 1:
+                    end = format_time_ass(sentence_word_groups[sent_idx + 1][0]["start"])
+                else:
+                    end = format_time_ass(video_end)
+                
+                if effect == "fade":
+                    ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(300,300)}}{sentence_text}\n"
+                elif effect == "bouncing":
+                    ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,300)\\t(0,200,\\fscx110\\fscy110)\\t(200,300,\\fscx100\\fscy100)}}{sentence_text}\n"
+                else:
+                    ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{sentence_text}\n"
     
     else:
-        full_text = " ".join(w["word"] for w in word_timings)
-        start = format_time_ass(word_timings[0]["start"])
-        end = format_time_ass(word_timings[-1]["end"] + 2.0)
-        ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
+        # OLD BEHAVIOR - show all text at once (fallback)
+        if effect == "karaoke":
+            video_end = word_timings[-1]["end"] + 2.0
+            
+            for i, timing in enumerate(word_timings):
+                start = format_time_ass(timing["start"])
+                
+                if i < len(word_timings) - 1:
+                    end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
+                else:
+                    end = format_time_ass(video_end)
+                
+                highlighted_words = []
+                for j, t in enumerate(word_timings):
+                    if j < i:
+                        highlighted_words.append(t["word"])
+                    elif j == i:
+                        highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
+                    else:
+                        highlighted_words.append(t["word"])
+                
+                highlighted_text = " ".join(highlighted_words)
+                ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{highlighted_text}\n"
+        
+        elif effect == "fade":
+            full_text = " ".join(w["word"] for w in word_timings)
+            start = format_time_ass(word_timings[0]["start"])
+            end = format_time_ass(word_timings[-1]["end"] + 2.0)
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
+        
+        elif effect == "typewriter":
+            video_end = word_timings[-1]["end"] + 2.0
+            
+            for i, timing in enumerate(word_timings):
+                start = format_time_ass(timing["start"])
+                
+                if i < len(word_timings) - 1:
+                    end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
+                else:
+                    end = format_time_ass(video_end)
+                
+                text_so_far = " ".join(w["word"] for w in word_timings[:i+1])
+                ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{text_so_far}\n"
+        
+        elif effect == "bouncing":
+            full_text = " ".join(w["word"] for w in word_timings)
+            start = format_time_ass(word_timings[0]["start"])
+            end = format_time_ass(word_timings[-1]["end"] + 2.0)
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\move(384,500,384,384,0,500)\\t(0,300,\\fscx120\\fscy120)\\t(300,500,\\fscx100\\fscy100)}}{full_text}\n"
+        
+        else:
+            full_text = " ".join(w["word"] for w in word_timings)
+            start = format_time_ass(word_timings[0]["start"])
+            end = format_time_ass(word_timings[-1]["end"] + 2.0)
+            ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{full_text}\n"
     
     with open(subtitle_path, "w", encoding="utf-8") as f:
         f.write(ass_content)
@@ -331,36 +438,38 @@ def format_time_ass(seconds):
     return f"{hours}:{minutes:02d}:{secs:05.2f}"
 
 def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_path, output_path, duration, sentence_timings):
-    """Create video with multiple images transitioning based on sentences"""
+    """Create video with multiple images transitioning based on sentences - OPTIMIZED FOR SPEED"""
     
     video_duration = duration + 2.0
     
     # Create filter complex for image transitions
     if len(image_paths) == 1:
-        # Single image - simple case
+        # Single image - simple case with FAST settings
         cmd = [
             "ffmpeg",
             "-loop", "1", "-i", image_paths[0],
             "-i", audio_path,
             "-vf", f"scale=768:768:force_original_aspect_ratio=increase,crop=768:768,setsar=1,subtitles={subtitle_path}",
             "-c:v", "libx264",
-            "-preset", "medium",
+            "-preset", "ultrafast",  # Changed from "medium" to "ultrafast"
+            "-crf", "28",  # Added CRF for faster encoding (lower quality but much faster)
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-b:a", "96k",  # Reduced from 128k to 96k
             "-t", str(video_duration),
             "-pix_fmt", "yuv420p",
+            "-threads", "0",  # Use all available CPU threads
             "-y",
             "-loglevel", "error",
             output_path
         ]
     else:
-        # Multiple images - create transitions
+        # Multiple images - create transitions with FAST settings
         inputs = []
         for img in image_paths:
             inputs.extend(["-loop", "1", "-i", img])
         inputs.extend(["-i", audio_path])
         
-        # Calculate transition point (midpoint of video)
+        # Calculate transition point
         transition_time = sentence_timings[1] if len(sentence_timings) > 1 else duration / 2
         
         # Build filter for image transition with crossfade
@@ -370,7 +479,7 @@ def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_pat
         
         # Create smooth crossfade between images
         if len(image_paths) == 2:
-            crossfade_duration = 0.5  # 0.5 second crossfade
+            crossfade_duration = 0.3  # Reduced from 0.5 to 0.3 seconds
             filter_parts.append(f"[v0][v1]xfade=transition=fade:duration={crossfade_duration}:offset={transition_time-crossfade_duration/2}[vout]")
             filter_parts.append(f"[vout]subtitles={subtitle_path}[final]")
         else:
@@ -378,7 +487,7 @@ def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_pat
             prev = "v0"
             for i in range(1, len(image_paths)):
                 t_time = sentence_timings[i] if i < len(sentence_timings) else (duration * i / len(image_paths))
-                crossfade_duration = 0.5
+                crossfade_duration = 0.3  # Reduced from 0.5 to 0.3
                 next_label = f"vout{i}" if i < len(image_paths) - 1 else "vout"
                 filter_parts.append(f"[{prev}][v{i}]xfade=transition=fade:duration={crossfade_duration}:offset={t_time-crossfade_duration/2}[{next_label}]")
                 prev = next_label
@@ -393,18 +502,20 @@ def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_pat
             "-map", "[final]",
             "-map", f"{len(image_paths)}:a",
             "-c:v", "libx264",
-            "-preset", "medium",
+            "-preset", "ultrafast",  # Changed from "medium" to "ultrafast"
+            "-crf", "28",  # Added CRF for faster encoding
             "-c:a", "aac",
-            "-b:a", "128k",
+            "-b:a", "96k",  # Reduced from 128k
             "-t", str(video_duration),
             "-pix_fmt", "yuv420p",
+            "-threads", "0",  # Use all CPU threads
             "-y",
             "-loglevel", "error",
             output_path
         ]
     
     try:
-        result = subprocess.run(cmd, timeout=120, capture_output=True)
+        result = subprocess.run(cmd, timeout=60, capture_output=True)  # Reduced timeout from 120 to 60
         if result.returncode != 0:
             print(f"FFmpeg error: {result.stderr.decode()}")
             return False
@@ -414,10 +525,11 @@ def create_video_with_images_and_subtitles(image_paths, audio_path, subtitle_pat
         return False
 
 def generate_image_pollinations(prompt, path):
+    """Generate image with faster timeout"""
     try:
         enhanced_prompt = f"high quality cinematic image: {prompt}, 4k, detailed, vibrant colors"
         url = f"https://pollinations.ai/p/{urllib.parse.quote(enhanced_prompt)}?width=768&height=768&nologo=true&enhance=true"
-        resp = requests.get(url, timeout=20)
+        resp = requests.get(url, timeout=15)  # Reduced from 20 to 15 seconds
         if resp.status_code == 200 and len(resp.content) > 1000:
             with open(path, "wb") as f:
                 f.write(resp.content)
@@ -629,14 +741,39 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
     output_path = f"/tmp/{uuid.uuid4()}.mp4"
     
     try:
-        # Step 1: Generate images for each sentence
-        print(f"Step 1: Generating {len(sentences)} images...")
-        for i, sentence in enumerate(sentences):
+        # Step 1: Generate images for each sentence (PARALLEL PROCESSING for speed)
+        print(f"Step 1: Generating {len(sentences)} images in parallel...")
+        print(f"DEBUG: Sentences to process: {sentences}")
+        import concurrent.futures
+        
+        def generate_single_image(args):
+            i, sentence, img_path = args
+            print(f"DEBUG: Generating image {i+1} for sentence: '{sentence}'")
             image_prompt = f"{category} theme: {sentence}"
-            if not (generate_image_pollinations(image_prompt, image_paths[i]) or 
-                    generate_image_placeholder(sentence, image_paths[i], category)):
+            
+            # Try Pollinations first
+            success = generate_image_pollinations(image_prompt, img_path)
+            if not success:
+                print(f"DEBUG: Pollinations failed for image {i+1}, using placeholder")
+                success = generate_image_placeholder(sentence, img_path, category)
+            
+            if success:
+                print(f"DEBUG: Image {i+1} saved to {img_path}, size: {os.path.getsize(img_path)} bytes")
+            else:
+                print(f"DEBUG: Image {i+1} FAILED completely")
+            
+            return i, success
+        
+        # Generate images in parallel threads for 2-3x speed boost
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(sentences), 3)) as executor:
+            image_args = [(i, sentence, image_paths[i]) for i, sentence in enumerate(sentences)]
+            results = list(executor.map(generate_single_image, image_args))
+        
+        # Check all images generated successfully
+        for i, success in results:
+            if not success:
                 raise HTTPException(500, f"Image {i+1} generation failed")
-            print(f"✅ Image {i+1}/{len(sentences)} generated")
+            print(f"✅ Image {i+1}/{len(sentences)} generated successfully")
         
         # Step 2: Generate audio with gTTS for full fact
         print("Step 2: Generating voice with gTTS...")
