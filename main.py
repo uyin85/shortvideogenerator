@@ -259,7 +259,7 @@ def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke", sent
     Uses sentence_word_groups to show each sentence on its own timing segment.
     Falls back to original behavior if sentence_word_groups is not provided or empty.
     """
-    
+
     ass_content = """[Script Info]
 Title: AI Generated Subtitles
 ScriptType: v4.00+
@@ -282,13 +282,14 @@ Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100
     # Use sentence word groups if provided and valid
     if sentence_word_groups and len(sentence_word_groups) > 0:
         print(f"DEBUG: Using {len(sentence_word_groups)} sentence word groups for subtitles")
-        video_end = word_timings[-1]["end"] + 2.0 # Or determine from sentence_timings if passed separately
+        video_end = word_timings[-1]["end"] + 2.0
 
         # Determine the end time for each sentence group
         sentence_end_times = []
         for i in range(len(sentence_word_groups)):
             if i < len(sentence_word_groups) - 1:
                 # Sentence ends when the next sentence starts
+                # We'll use the start time of the first word of the next sentence
                 next_sentence_start = sentence_word_groups[i + 1][0]["start"]
                 sentence_end_times.append(next_sentence_start)
             else:
@@ -308,43 +309,99 @@ Style: Default,Arial,48,&H00FFFFFF,&H000088EF,&H00000000,&H80000000,-1,0,0,0,100
 
             if effect == "karaoke":
                 # Karaoke effect *within* the sentence's time window
-                for i, timing in enumerate(sentence_words):
+                # We iterate through ALL word_timings, but only apply highlighting if the word belongs to THIS sentence.
+                for i, timing in enumerate(word_timings):
                     word_start_ass = format_time_ass(timing["start"])
 
                     # Determine word end time
-                    if i < len(sentence_words) - 1:
-                        # End just before the next word in *this* sentence starts
-                        word_end_ass = format_time_ass(sentence_words[i + 1]["start"] - 0.001)
+                    if i < len(word_timings) - 1:
+                        word_end_ass = format_time_ass(word_timings[i + 1]["start"] - 0.001)
                     else:
-                        # Last word of the sentence, ends when the sentence window ends
                         word_end_ass = end_ass
 
+                    # Check if this word belongs to the current sentence group
+                    # We do this by checking if the word's text matches one of the words in sentence_words
+                    # and if its start time falls within the sentence's window.
+                    # A simpler approach: if the word is in the sentence_words list AND its start time is >= sentence_start_time and < sentence_end_time.
+                    word_in_current_sentence = False
+                    for sw in sentence_words:
+                        if timing["word"] == sw["word"] and abs(timing["start"] - sw["start"]) < 0.1: # Small tolerance for floating point errors
+                            word_in_current_sentence = True
+                            break
+
+                    if not word_in_current_sentence:
+                        # Skip this word if it doesn't belong to the current sentence
+                        continue
+
                     # Build text string for this frame: previous words normal, current word highlighted, rest normal
+                    # But only for words that belong to the current sentence
                     highlighted_words = []
-                    for j, w_timing in enumerate(sentence_words):
+                    for j, t in enumerate(word_timings):
+                        # Only consider words that belong to the current sentence for this sentence's display
+                        word_belongs_to_current = False
+                        for sw in sentence_words:
+                            if t["word"] == sw["word"] and abs(t["start"] - sw["start"]) < 0.1:
+                                word_belongs_to_current = True
+                                break
+
+                        if not word_belongs_to_current:
+                            # Skip words not belonging to this sentence
+                            continue
+
                         if j < i:
-                            highlighted_words.append(w_timing["word"])
+                            highlighted_words.append(t["word"])
                         elif j == i:
-                            highlighted_words.append("{\\c&H00FFFF&\\b1}" + w_timing["word"] + "{\\c&HFFFFFF&\\b0}")
+                            highlighted_words.append("{\\c&H00FFFF&\\b1}" + t["word"] + "{\\c&HFFFFFF&\\b0}")
                         else:
-                            highlighted_words.append(w_timing["word"])
+                            highlighted_words.append(t["word"])
+
+                    if not highlighted_words: # Safety check
+                        continue
 
                     current_sentence_text = " ".join(highlighted_words)
                     ass_content += f"Dialogue: 0,{word_start_ass},{word_end_ass},Default,,0,0,0,,{current_sentence_text}\n"
 
             elif effect == "typewriter":
                 # Typewriter effect *within* the sentence's time window
-                for i, timing in enumerate(sentence_words):
+                # Similar logic: only show words belonging to the current sentence
+                for i, timing in enumerate(word_timings):
                     word_start_ass = format_time_ass(timing["start"])
 
-                    if i < len(sentence_words) - 1:
-                        word_end_ass = format_time_ass(sentence_words[i + 1]["start"] - 0.001)
+                    if i < len(word_timings) - 1:
+                        word_end_ass = format_time_ass(word_timings[i + 1]["start"] - 0.001)
                     else:
                         word_end_ass = end_ass
 
-                    # Text appears progressively
-                    text_so_far = " ".join(w["word"] for w in sentence_words[:i+1])
-                    ass_content += f"Dialogue: 0,{word_start_ass},{word_end_ass},Default,,0,0,0,,{text_so_far}\n"
+                    # Check if this word belongs to the current sentence group
+                    word_in_current_sentence = False
+                    for sw in sentence_words:
+                        if timing["word"] == sw["word"] and abs(timing["start"] - sw["start"]) < 0.1:
+                            word_in_current_sentence = True
+                            break
+
+                    if not word_in_current_sentence:
+                        continue
+
+                    # Text appears progressively, but only for words in the current sentence
+                    text_so_far = []
+                    for j, t in enumerate(word_timings):
+                        word_belongs_to_current = False
+                        for sw in sentence_words:
+                            if t["word"] == sw["word"] and abs(t["start"] - sw["start"]) < 0.1:
+                                word_belongs_to_current = True
+                                break
+
+                        if not word_belongs_to_current:
+                            continue
+
+                        if j <= i:
+                            text_so_far.append(t["word"])
+
+                    if not text_so_far:
+                        continue
+
+                    text_so_far_str = " ".join(text_so_far)
+                    ass_content += f"Dialogue: 0,{word_start_ass},{word_end_ass},Default,,0,0,0,,{text_so_far_str}\n"
 
             else: # 'static', 'fade', 'bouncing', or any other effect
                 # Show the entire sentence text for its duration window
