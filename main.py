@@ -239,7 +239,7 @@ def generate_word_timings(text: str, duration: float):
     
     return analyze_speech_pattern(text, duration)
 
-def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke", sentence_boundaries=None):
+def create_karaoke_subtitles(word_timings, subtitle_path, effect="karaoke", sentence_word_groups=None):
     """Create ASS subtitle file with karaoke or other effects - CENTERED TEXT - SENTENCE BY SENTENCE"""
     
     ass_content = """[Script Info]
@@ -264,30 +264,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             f.write(ass_content)
         return
 
-    # Determine sentence boundaries if provided
-    if sentence_boundaries and len(sentence_boundaries) > 0:
-        # SHOW ONLY CURRENT SENTENCE
+    # Use sentence word groups if provided (CORRECT WAY)
+    if sentence_word_groups and len(sentence_word_groups) > 0:
+        print(f"DEBUG: Using {len(sentence_word_groups)} sentence word groups")
         video_end = word_timings[-1]["end"] + 2.0
-        
-        # Split word timings by sentence
-        sentence_word_groups = []
-        current_sentence_words = []
-        word_idx = 0
-        
-        for word_timing in word_timings:
-            current_sentence_words.append(word_timing)
-            word_idx += 1
-            
-            # Check if this word ends a sentence (has period, exclamation, question mark)
-            if any(punct in word_timing["word"] for punct in '.!?'):
-                sentence_word_groups.append(current_sentence_words)
-                current_sentence_words = []
-        
-        # Add any remaining words
-        if current_sentence_words:
-            sentence_word_groups.append(current_sentence_words)
-        
-        print(f"DEBUG: Split into {len(sentence_word_groups)} sentence groups")
         
         # Create subtitles for each sentence separately
         if effect == "karaoke":
@@ -299,11 +279,17 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 
                 # Determine when this sentence ends
                 if sent_idx < len(sentence_word_groups) - 1:
-                    # End when next sentence starts
-                    sentence_end = sentence_word_groups[sent_idx + 1][0]["start"]
+                    # End when next sentence starts (if it exists)
+                    next_sentence = sentence_word_groups[sent_idx + 1]
+                    if next_sentence:
+                        sentence_end = next_sentence[0]["start"]
+                    else:
+                        sentence_end = video_end
                 else:
                     # Last sentence - keep visible until video end
                     sentence_end = video_end
+                
+                print(f"DEBUG: Sentence {sent_idx+1}: {sentence_start:.2f}s - {sentence_end:.2f}s, {len(sentence_words)} words")
                 
                 # Create karaoke effect for this sentence only
                 for i, timing in enumerate(sentence_words):
@@ -335,7 +321,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     continue
                 
                 if sent_idx < len(sentence_word_groups) - 1:
-                    sentence_end = sentence_word_groups[sent_idx + 1][0]["start"]
+                    next_sentence = sentence_word_groups[sent_idx + 1]
+                    sentence_end = next_sentence[0]["start"] if next_sentence else video_end
                 else:
                     sentence_end = video_end
                 
@@ -359,7 +346,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 start = format_time_ass(sentence_words[0]["start"])
                 
                 if sent_idx < len(sentence_word_groups) - 1:
-                    end = format_time_ass(sentence_word_groups[sent_idx + 1][0]["start"])
+                    next_sentence = sentence_word_groups[sent_idx + 1]
+                    end = format_time_ass(next_sentence[0]["start"]) if next_sentence else format_time_ass(video_end)
                 else:
                     end = format_time_ass(video_end)
                 
@@ -789,9 +777,11 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
         word_timings = generate_word_timings(safe_fact, duration)
         print(f"Generated {len(word_timings)} word timings")
         
-        # Calculate sentence timing boundaries
+        # Calculate sentence timing boundaries and word groups
         sentence_timings = []
+        sentence_word_groups = []  # NEW: Track which words belong to which sentence
         word_index = 0
+        
         for sentence in sentences:
             sentence_words = sentence.split()
             sentence_word_count = len(sentence_words)
@@ -800,12 +790,19 @@ def generate_video(fact: str, category: str = "science", effect: str = "karaoke"
                 # Get timing of first word in this sentence
                 sentence_start = word_timings[word_index]["start"]
                 sentence_timings.append(sentence_start)
+                
+                # Get word timings for this sentence
+                sentence_word_timings = word_timings[word_index:word_index + sentence_word_count]
+                sentence_word_groups.append(sentence_word_timings)
+                
                 word_index += sentence_word_count
             else:
                 # Fallback: distribute evenly
                 sentence_timings.append(duration * len(sentence_timings) / len(sentences))
+                sentence_word_groups.append([])
         
         print(f"Sentence timings: {sentence_timings}")
+        print(f"Sentence word groups: {len(sentence_word_groups)} groups")
         
         # Step 4: Create subtitle file with selected effect
         print(f"Step 4: Creating {effect} subtitles (centered)...")
