@@ -24,8 +24,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://multisite.interactivelink.site  ",
-        "https://multisite.interactivelink.site/factshortvideogen  ",
+        "https://multisite.interactivelink.site",
+        "https://multisite.interactivelink.site/factshortvideogen",
         "http://localhost:3000",
         "http://127.0.0.1:3000"
     ],
