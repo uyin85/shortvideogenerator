@@ -299,8 +299,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             
-            # Each dialogue shows from word start to video end (text stays visible)
-            end = format_time_ass(video_end)
+            # CRITICAL FIX: End current line RIGHT BEFORE next word starts
+            # This prevents overlapping dialogue lines
+            if i < len(word_timings) - 1:
+                # End just before next word (subtract tiny amount to avoid overlap)
+                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
+            else:
+                # Last word stays until video end
+                end = format_time_ass(video_end)
             
             # Build sentence with current word highlighted in yellow
             highlighted_words = []
@@ -326,17 +332,19 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         ass_content += f"Dialogue: 0,{start},{end},Default,,0,0,0,,{{\\fad(800,500)}}{full_text}\n"
     
     elif effect == "typewriter":
-        # Show each word appearing one by one, but keep all previous words visible
+        # Show words appearing one by one - each line replaces the previous
         video_end = word_timings[-1]["end"] + 2.0
         
         for i, timing in enumerate(word_timings):
             start = format_time_ass(timing["start"])
             
-            # End time: if not last word, end when next word appears
-            # If last word, end at video_end to keep text visible
+            # CRITICAL FIX: End current line RIGHT BEFORE next word starts
+            # This prevents overlapping dialogue lines
             if i < len(word_timings) - 1:
-                end = format_time_ass(word_timings[i + 1]["start"])
+                # End just before next word (subtract tiny amount to avoid overlap)
+                end = format_time_ass(word_timings[i + 1]["start"] - 0.001)
             else:
+                # Last word stays until video end
                 end = format_time_ass(video_end)
             
             # Show all words up to and including current word
@@ -399,7 +407,6 @@ def create_video_with_subtitles(image_path, audio_path, subtitle_path, output_pa
     except Exception as e:
         print(f"Video creation error: {e}")
         return False
-
 def generate_image_pollinations(prompt, path):
     try:
         # Enhanced prompt for better visuals
